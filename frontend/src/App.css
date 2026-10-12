@@ -17,13 +17,14 @@ header p {
 
 .toolbar {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin-bottom: 24px;
 }
 
 .theme-toggle {
+  margin-left: auto;
   padding: 6px 14px;
   font-weight: 500;
   color: var(--text);
@@ -31,21 +32,21 @@ header p {
   border: 1px solid var(--border);
 }
 
-.unit-toggle {
+.segmented {
   display: inline-flex;
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
 }
 
-.unit-toggle button {
-  padding: 6px 18px;
+.segmented button {
+  padding: 6px 14px;
   color: var(--text);
   background: var(--surface);
   border-radius: 0;
 }
 
-.unit-toggle button[aria-pressed='true'] {
+.segmented button[aria-pressed='true'] {
   color: var(--accent-text);
   background: var(--accent);
 }
@@ -78,8 +79,7 @@ label {
   color: var(--muted);
 }
 
-input,
-select {
+input {
   width: 100%;
   padding: 8px 10px;
   font: inherit;
@@ -91,7 +91,6 @@ select {
 }
 
 input:focus-visible,
-select:focus-visible,
 button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;

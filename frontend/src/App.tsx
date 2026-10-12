@@ -8,7 +8,6 @@ type Theme = 'light' | 'dark'
 interface TargetLoadResponse {
   e1rm_kg: number
   target_weight_kg: number
-  rounded_weight_kg: number
 }
 
 interface ValidationIssue {
@@ -19,8 +18,11 @@ interface ValidationIssue {
 const DEBOUNCE_MS = 200
 const KG_PER_LB = 0.45359237
 const UNITS: Unit[] = ['kg', 'lb']
-const INCREMENTS: Record<Unit, number[]> = { kg: [1, 2.5, 5], lb: [2.5, 5, 10] }
-const DEFAULT_INCREMENT: Record<Unit, string> = { kg: '2.5', lb: '5' }
+const FORMULAS: { value: Formula; label: string }[] = [
+  { value: 'hybrid', label: 'Hybrid' },
+  { value: 'epley', label: 'Epley' },
+  { value: 'brzycki', label: 'Brzycki' },
+]
 
 // The API works in kg only; these convert at the display layer.
 function toKg(value: number, unit: Unit): number {
@@ -65,7 +67,6 @@ function App() {
   const [targetReps, setTargetReps] = useState('3')
   const [targetRpe, setTargetRpe] = useState('5')
   const [formula, setFormula] = useState<Formula>('hybrid')
-  const [increment, setIncrement] = useState('2.5')
 
   const [result, setResult] = useState<TargetLoadResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -83,7 +84,6 @@ function App() {
     if (prWeight !== '' && Number.isFinite(weight)) {
       setPrWeight(String(Number(fromKg(toKg(weight, unit), next).toFixed(1))))
     }
-    setIncrement(DEFAULT_INCREMENT[next])
     setUnit(next)
   }
 
@@ -98,7 +98,6 @@ function App() {
         target_reps: Number(targetReps),
         target_rpe: Number(targetRpe),
         formula,
-        increment_kg: toKg(Number(increment), unit),
       })
     : null
 
@@ -139,7 +138,7 @@ function App() {
         <h1>KiloPlan</h1>
         <p>Work out what to load for a set, from a past set of the same lift.</p>
         <div className="toolbar">
-          <div className="unit-toggle" role="group" aria-label="Weight unit">
+          <div className="segmented" role="group" aria-label="Weight unit">
             {UNITS.map((option) => (
               <button
                 key={option}
@@ -148,6 +147,18 @@ function App() {
                 onClick={() => changeUnit(option)}
               >
                 {option}
+              </button>
+            ))}
+          </div>
+          <div className="segmented" role="group" aria-label="Formula">
+            {FORMULAS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={formula === option.value}
+                onClick={() => setFormula(option.value)}
+              >
+                {option.label}
               </button>
             ))}
           </div>
@@ -222,28 +233,6 @@ function App() {
             />
           </label>
         </fieldset>
-
-        <fieldset>
-          <legend>Options</legend>
-          <label>
-            Formula
-            <select value={formula} onChange={(event) => setFormula(event.target.value as Formula)}>
-              <option value="hybrid">Hybrid</option>
-              <option value="epley">Epley</option>
-              <option value="brzycki">Brzycki</option>
-            </select>
-          </label>
-          <label>
-            Round to
-            <select value={increment} onChange={(event) => setIncrement(event.target.value)}>
-              {INCREMENTS[unit].map((value) => (
-                <option key={value} value={value}>
-                  {value} {unit}
-                </option>
-              ))}
-            </select>
-          </label>
-        </fieldset>
       </form>
 
       {complete && error && (
@@ -255,12 +244,8 @@ function App() {
       {complete && result && (
         <section className="result" aria-live="polite">
           <p className="result-label">Load</p>
-          <p className="result-value">{formatWeight(result.rounded_weight_kg, unit, 1)}</p>
+          <p className="result-value">{formatWeight(result.target_weight_kg, unit, 1)}</p>
           <dl>
-            <div>
-              <dt>Exact</dt>
-              <dd>{formatWeight(result.target_weight_kg, unit, 2)}</dd>
-            </div>
             <div>
               <dt>Estimated 1RM</dt>
               <dd>{formatWeight(result.e1rm_kg, unit, 1)}</dd>
