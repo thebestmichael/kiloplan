@@ -1,7 +1,11 @@
+from datetime import date
+
 import pytest
+from sqlalchemy import select
 
 from kiloplan.chatbot.tools import BELOW_CHART_NOTE, KG_PER_LB, TOOL_SCHEMAS, ProgramTools
 from kiloplan.ingestion.coach_sheet import parse_workbook
+from kiloplan.storage.models import APP, DAY, Lifter, PerformedSet
 from kiloplan.storage.program_store import store_program
 from workbooks import EXAMPLE_PROGRAM, as_bytes, program_workbook
 
@@ -195,3 +199,52 @@ def test_every_schema_names_a_real_tool(tools):
     for schema in TOOL_SCHEMAS:
         assert callable(getattr(tools, schema["name"]))
         assert schema["parameters"]["type"] == "object"
+
+
+def log_in_app(session, lifter, performed_on, load_kg, reps, rpe):
+    performed = PerformedSet(
+        lifter=session.scalars(select(Lifter).where(Lifter.name == lifter)).one(),
+        source=APP,
+        performed_on=performed_on,
+        date_precision=DAY,
+        movement_raw="Squat",
+        lift="squat",
+        variation="competition",
+        sets=1,
+        reps=reps,
+        load_kg=load_kg,
+        rpe=rpe,
+    )
+    session.add(performed)
+    session.commit()
+    return performed
+
+
+def test_a_set_logged_in_the_app_after_the_program_is_the_latest(tools, session):
+    logged = log_in_app(session, "ana", date(2026, 4, 8), 190.0, 2, 8)
+
+    top = tools.latest_top_set("squat")["set"]
+    assert (top["set_id"], top["load_kg"], top["date"]) == (logged.id, 190.0, "2026-04-08")
+    assert top["description"] == "Squat 1x2 at 418.9 lb (190.0 kg), RPE 8 (logged on 2026-04-08)"
+
+    found = tools.find_sets("squat", reps=2, stated_load=190, unit="kg")
+    assert (found["status"], found["set"]["set_id"]) == ("ok", logged.id)
+    assert tools.target_load(target_reps=2, target_rpe=5, set_id=logged.id)["status"] == "ok"
+
+
+def test_a_set_logged_in_the_app_is_placed_among_program_weeks_by_date(tools, session):
+    # 3/18 falls in week 3 (3/16), so week 4's sets are still the latest
+    log_in_app(session, "ana", date(2026, 3, 18), 190.0, 3, 8)
+    top = tools.latest_top_set("squat")["set"]
+    assert (top["week"], top["day"], top["load_lb"]) == (4, "Day 3", 380.0)
+
+    # a week number is a place in the program, which an app set does not have
+    in_week_3 = tools.find_sets("squat", week_number=3, reps=3)
+    assert (in_week_3["status"], in_week_3["set"]["load_lb"]) == ("ok", 395.0)
+
+
+def test_app_sets_alone_are_enough_to_answer_from(session):
+    session.add(Lifter(name="cy"))
+    session.commit()
+    logged = log_in_app(session, "cy", date(2026, 4, 8), 190.0, 2, 8)
+    assert ProgramTools(session, "cy").latest_top_set("squat")["set"]["set_id"] == logged.id

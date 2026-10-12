@@ -3,7 +3,18 @@ from datetime import date
 from sqlalchemy import func, select
 
 from kiloplan.ingestion.coach_sheet import parse_workbook
-from kiloplan.storage.models import Block, Lifter, Note, ProgramIssue, ProgramRow, Upload, Week
+from kiloplan.storage.models import (
+    APP,
+    DAY,
+    Block,
+    Lifter,
+    Note,
+    PerformedSet,
+    ProgramIssue,
+    ProgramRow,
+    Upload,
+    Week,
+)
 from kiloplan.storage.program_store import latest_upload, store_program
 from workbooks import as_bytes, line, program_workbook
 
@@ -156,3 +167,64 @@ def test_storing_again_replaces_the_lifters_program_only(session):
     assert latest_upload(session, "ana").blocks[0].sheet_name == "Summer"
     assert latest_upload(session, "ben").blocks[0].sheet_name == "Spring"
     assert latest_upload(session, "nobody") is None
+
+
+def test_each_row_with_a_load_becomes_a_performed_set(session):
+    store(
+        session,
+        {
+            "Spring": [
+                (
+                    "Week 1",
+                    "3/2-8/26",
+                    {
+                        "Day 1": [
+                            line("Paused Squats", 1, 3, 405, 9),
+                            line("Leg Press", 3, 10, None),
+                        ]
+                    },
+                )
+            ]
+        },
+    )
+    performed = session.scalars(select(PerformedSet)).one()
+    assert (performed.lifter.name, performed.source) == ("ana", "coach_sheet")
+    assert (performed.performed_on, performed.date_precision) == (date(2026, 3, 2), "week")
+    assert (performed.lift, performed.variation, performed.sets, performed.reps) == (
+        "squat",
+        "paused",
+        1,
+        3,
+    )
+    assert (performed.load_kg, performed.rpe) == (405 * 0.45359237, 9.0)
+    assert performed.program_row.movement_raw == "Paused Squats"
+
+
+def test_storing_again_replaces_sheet_sets_and_keeps_app_sets(session):
+    store(session, {"Spring": [("Week 1", "3/2-8/26", squat_day(300))]})
+    ana = session.scalars(select(Lifter)).one()
+    session.add(
+        PerformedSet(
+            lifter=ana,
+            source=APP,
+            performed_on=date(2026, 3, 10),
+            date_precision=DAY,
+            movement_raw="Squat",
+            lift="squat",
+            variation="competition",
+            sets=1,
+            reps=2,
+            load_kg=150.0,
+            rpe=8.0,
+        )
+    )
+    session.commit()
+
+    store(session, {"Summer": [("Week 1", "6/1-7/26", squat_day(330))]})
+
+    sets = session.scalars(select(PerformedSet).order_by(PerformedSet.load_kg)).all()
+    assert [(performed.source, round(performed.load_kg, 1)) for performed in sets] == [
+        ("coach_sheet", 149.7),
+        ("app", 150.0),
+    ]
+    assert sets[0].program_row.week.block.sheet_name == "Summer"
