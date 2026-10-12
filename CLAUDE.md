@@ -9,6 +9,11 @@ Portfolio project aimed at data engineering roles.
 ## Architecture principle
 - Every feature stores structured data and exposes tools. New features add tools
   the assistant can call.
+- Tools are registered, not wired in: a feature provides a tool group (a class
+  with `tools()` and `instructions`, like ProgramTools) and it is passed to the
+  Toolbox in src/kiloplan/chatbot/toolbox.py. assistant.py names no tools and
+  needs no change for a new group. toolbox.py lists the result keys the
+  assistant relies on (status, message, set, based_on, below_chart_range).
 - The assistant's model never does arithmetic and only answers from tool results.
   Code checks that every number in an answer came from a tool result or the
   lifter's own words.
@@ -37,7 +42,7 @@ S3 (Parquet), Terraform, Docker.
 - src/kiloplan/analytics/e1rm.py: e1RM formulas and target load
 - src/kiloplan/ingestion/: coach spreadsheet parser, lift classifier
 - src/kiloplan/storage/: models, engine, migrations, program store
-- src/kiloplan/chatbot/: tools, model interface, assistant
+- src/kiloplan/chatbot/: tool registry, program tools, model interface, assistant
 - src/kiloplan/api/main.py: FastAPI app
 - tests/workbooks.py: builders for synthetic coach workbooks
 
