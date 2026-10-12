@@ -2,7 +2,7 @@
 
 Every number in an answer must come from one of these results, so each tool decides
 its own `status` in code and returns loads in both kg and lb, already rounded for
-display.
+display. `ProgramTools` is a tool group for the assistant's `Toolbox`.
 """
 
 from collections.abc import Callable
@@ -18,6 +18,7 @@ from kiloplan.analytics.e1rm import (
     e1rm_from_rpe,
     weight_for_rpe,
 )
+from kiloplan.chatbot.toolbox import CALCULATION, LOOKUP, Result, Tool
 from kiloplan.ingestion.lifts import COMPETITION
 from kiloplan.storage.models import Block, Lifter, PerformedSet, Upload, Week
 from kiloplan.storage.program_store import latest_upload
@@ -36,7 +37,12 @@ FORMULA_NOTE = (
     "reps in reserve = 10 - RPE; hybrid formula (Brzycki up to 10 theoretical reps, Epley above)"
 )
 
-Result = dict[str, Any]
+INSTRUCTIONS = """\
+- To find the set a lifter describes, call find_sets and pass what they said \
+(stated_load, stated_rpe, unit). If they do not name a set, call latest_top_set.
+- To answer "what weight should I take", call target_load with the set_id you found.
+- Do not swap in a different lift variation without asking.
+"""
 
 
 def _to_kg(load: float, unit: str) -> float:
@@ -127,6 +133,8 @@ def _day_key(performed: PerformedSet) -> tuple[Any, ...]:
 
 class ProgramTools:
     """The tools, bound to one lifter's stored program."""
+
+    instructions = INSTRUCTIONS
 
     def __init__(self, session: Session, lifter: str) -> None:
         self.session = session
@@ -419,22 +427,117 @@ class ProgramTools:
         result["below_chart_range"] = estimate["below_chart_range"] or below_chart_range(target_rpe)
         return self._finish(result)
 
-    def call(self, name: str, arguments: dict[str, Any]) -> Result:
-        """Run a tool by name. Bad names and arguments come back as results, not exceptions."""
-        tools: dict[str, Callable[..., Result]] = {
-            "find_sets": self.find_sets,
-            "latest_top_set": self.latest_top_set,
-            "estimate_e1rm": self.estimate_e1rm,
-            "target_load": self.target_load,
-        }
-        if name not in tools:
-            return {"status": "invalid_input", "message": f"Unknown tool {name!r}."}
-        try:
-            return tools[name](
-                **{key: value for key, value in arguments.items() if value is not None}
-            )
-        except (TypeError, ValueError) as error:
-            return {"status": "invalid_input", "message": str(error)}
+    def tools(self) -> list[Tool]:
+        return [
+            Tool(
+                name="find_sets",
+                description=(
+                    "Look up the logged set a lifter describes, in the most recent matching "
+                    "week. Pass what the lifter said (stated_load, stated_rpe) so it can be "
+                    "checked against the log."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "lift": _LIFT,
+                        "variation": _VARIATION,
+                        "week_number": {"type": "integer", "description": "Week within its block."},
+                        "block": {
+                            "type": "integer",
+                            "description": "Block number, 1 is the oldest.",
+                        },
+                        "reps": {"type": "integer"},
+                        "stated_load": {"type": "number"},
+                        "stated_rpe": {"type": "number"},
+                        "unit": _UNIT,
+                    },
+                    "required": ["lift"],
+                },
+                kind=LOOKUP,
+                handler=self.find_sets,
+                summarize=_summarize_found_set,
+                explain=_explain_failure,
+            ),
+            Tool(
+                name="latest_top_set",
+                description=(
+                    "The lifter's most recent top set of a lift with RPE 6 or higher. Use when "
+                    "the lifter does not name a past set."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"lift": _LIFT, "variation": _VARIATION},
+                    "required": ["lift"],
+                },
+                kind=LOOKUP,
+                handler=self.latest_top_set,
+                summarize=_summarize_found_set,
+                explain=_explain_failure,
+            ),
+            Tool(
+                name="estimate_e1rm",
+                description="Estimated one-rep max from a logged set (set_id) or a stated set.",
+                parameters={"type": "object", "properties": _BASIS, "required": []},
+                kind=CALCULATION,
+                handler=self.estimate_e1rm,
+                summarize=_summarize_e1rm,
+                explain=_explain_failure,
+            ),
+            Tool(
+                name="target_load",
+                description=(
+                    "The load to use for a prescription of target_reps at target_rpe, based on "
+                    "a logged set (set_id) or a stated set. Returns the e1RM it used as well."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "target_reps": {"type": "integer"},
+                        "target_rpe": {"type": "number"},
+                        **_BASIS,
+                    },
+                    "required": ["target_reps", "target_rpe"],
+                },
+                kind=CALCULATION,
+                handler=self.target_load,
+                summarize=_summarize_target_load,
+                explain=_explain_failure,
+            ),
+        ]
+
+
+def _summarize_found_set(result: Result) -> str:
+    return f"I found this logged set: {result['set']['description']}."
+
+
+def _summarize_e1rm(result: Result) -> str:
+    return f"Your estimated 1RM is {result['e1rm_text']}."
+
+
+def _summarize_target_load(result: Result) -> str:
+    target = result["target"]
+    return (
+        f"Take {result['target_load_text']} for {target['reps']:g} reps at RPE "
+        f"{target['rpe']:g}. That uses an estimated 1RM of {result['e1rm_text']}."
+    )
+
+
+def _explain_failure(result: Result) -> str:
+    """What a failed lookup or calculation found, and a question back to the lifter."""
+    found = (
+        result.get("logged_sets")
+        or result.get("matching_sets")
+        or result.get("sets_in_that_week")
+        or ([result["set"]] if "set" in result else [])
+    )
+    lines = [result["message"]]
+    if found:
+        lines.append("Logged: " + "; ".join(item["description"] for item in found))
+    variations = result.get("variations_with_data")
+    if variations:
+        lines.append("Variations with logged sets: " + ", ".join(variations) + ".")
+    lines.append("Which set should I use?")
+    return "\n".join(lines)
 
 
 _LIFT = {"type": "string", "enum": list(MAIN_LIFTS)}
@@ -456,60 +559,3 @@ _BASIS = {
         "description": "RPE of the stated set, or of a logged set whose RPE was not logged.",
     },
 }
-
-TOOL_SCHEMAS: list[dict[str, Any]] = [
-    {
-        "name": "find_sets",
-        "description": (
-            "Look up the logged set a lifter describes, in the most recent matching week. Pass "
-            "what the lifter said (stated_load, stated_rpe) so it can be checked against the log."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "lift": _LIFT,
-                "variation": _VARIATION,
-                "week_number": {"type": "integer", "description": "Week within its block."},
-                "block": {"type": "integer", "description": "Block number, 1 is the oldest."},
-                "reps": {"type": "integer"},
-                "stated_load": {"type": "number"},
-                "stated_rpe": {"type": "number"},
-                "unit": _UNIT,
-            },
-            "required": ["lift"],
-        },
-    },
-    {
-        "name": "latest_top_set",
-        "description": (
-            "The lifter's most recent top set of a lift with RPE 6 or higher. Use when the "
-            "lifter does not name a past set."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {"lift": _LIFT, "variation": _VARIATION},
-            "required": ["lift"],
-        },
-    },
-    {
-        "name": "estimate_e1rm",
-        "description": "Estimated one-rep max from a logged set (set_id) or a stated set.",
-        "parameters": {"type": "object", "properties": _BASIS, "required": []},
-    },
-    {
-        "name": "target_load",
-        "description": (
-            "The load to use for a prescription of target_reps at target_rpe, based on a logged "
-            "set (set_id) or a stated set. Returns the e1RM it used as well."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "target_reps": {"type": "integer"},
-                "target_rpe": {"type": "number"},
-                **_BASIS,
-            },
-            "required": ["target_reps", "target_rpe"],
-        },
-    },
-]

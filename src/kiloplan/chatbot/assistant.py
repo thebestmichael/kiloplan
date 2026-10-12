@@ -16,26 +16,22 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kiloplan.chatbot.llm import ChatModel, Message, ModelTurn
-from kiloplan.chatbot.tools import BELOW_CHART_NOTE, TOOL_SCHEMAS, ProgramTools
+from kiloplan.chatbot.toolbox import CALCULATION, LOOKUP, Toolbox
+from kiloplan.chatbot.tools import BELOW_CHART_NOTE
 
 MAX_MODEL_TURNS = 8
-LOOKUP_TOOLS = ("find_sets", "latest_top_set")
-CALCULATION_TOOLS = ("estimate_e1rm", "target_load")
 
+# the rules every tool group shares; each group adds its own through the toolbox
 SYSTEM_PROMPT = """\
-You are KiloPlan's program assistant for a powerlifter. You answer questions about the \
-lifter's own logged training using the tools provided.
+You are KiloPlan's assistant for a powerlifter. You answer questions about the lifter's \
+own logged training using the tools provided.
 
 Rules:
 - Never do arithmetic or unit conversion yourself, and never estimate. Every number you \
 write must be copied exactly from a tool result or from the lifter's question.
-- To find the set a lifter describes, call find_sets and pass what they said \
-(stated_load, stated_rpe, unit). If they do not name a set, call latest_top_set.
-- To answer "what weight should I take", call target_load with the set_id you found.
-- If a tool result's status is not "ok", do not give a load. Tell the lifter what the \
+- If a tool result's status is not "ok", do not give a number. Tell the lifter what the \
 tool found and ask them what to do.
 - Say which logged set the answer is based on.
-- Do not swap in a different lift variation without asking.
 - Keep the answer to a few sentences, in the unit the lifter used.
 """
 
@@ -64,9 +60,12 @@ LIST_MARKER = re.compile(r"^\s*\d+[.)]\s", re.MULTILINE)
 
 @dataclass
 class Calculation:
+    """One tool call and its result. `kind` is the tool's: lookup or calculation."""
+
     tool: str
     arguments: dict[str, Any]
     result: dict[str, Any]
+    kind: str = CALCULATION
 
 
 @dataclass
@@ -113,9 +112,9 @@ def unsupported_numbers(answer: str, question: str, calculations: list[Calculati
 
 
 class Assistant:
-    def __init__(self, model: ChatModel, tools: ProgramTools) -> None:
+    def __init__(self, model: ChatModel, toolbox: Toolbox) -> None:
         self.model = model
-        self.tools = tools
+        self.toolbox = toolbox
 
     def ask(self, question: str) -> AssistantAnswer:
         if mentions_pain(question):
@@ -124,13 +123,13 @@ class Assistant:
             )
 
         messages: list[Message] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": SYSTEM_PROMPT + self.toolbox.instructions},
             {"role": "user", "content": question},
         ]
         calculations: list[Calculation] = []
         text = self._run(messages, calculations)
 
-        blocked = self._blocking_result(calculations)
+        blocked = self._blocking_call(calculations)
         if blocked:
             return self._clarification(text, question, calculations, blocked)
 
@@ -143,33 +142,35 @@ class Assistant:
     def _run(self, messages: list[Message], calculations: list[Calculation]) -> str:
         """Let the model call tools until it writes an answer. Returns that text."""
         for _ in range(MAX_MODEL_TURNS):
-            turn: ModelTurn = self.model.complete(messages, TOOL_SCHEMAS)
+            turn: ModelTurn = self.model.complete(messages, self.toolbox.schemas)
             if not turn.tool_calls:
                 return turn.text.strip()
             messages.append(
                 {"role": "assistant", "content": turn.text, "tool_calls": turn.tool_calls}
             )
             for call in turn.tool_calls:
-                result = self.tools.call(call.name, call.arguments)
-                calculations.append(Calculation(call.name, call.arguments, result))
+                result = self.toolbox.call(call.name, call.arguments)
+                tool = self.toolbox.get(call.name)
+                kind = tool.kind if tool else CALCULATION
+                calculations.append(Calculation(call.name, call.arguments, result, kind))
                 messages.append(
                     {"role": "tool", "tool_name": call.name, "content": json.dumps(result)}
                 )
         return ""
 
     @staticmethod
-    def _blocking_result(calculations: list[Calculation]) -> dict[str, Any] | None:
-        """The failed lookup or calculation that should stop a load being given, if any.
+    def _blocking_call(calculations: list[Calculation]) -> Calculation | None:
+        """The failed lookup or calculation that should stop an answer being given, if any.
 
         A failed lookup is cleared only by a later successful lookup, never by
         calculating from numbers the log did not confirm. A failed calculation is
         cleared by a later successful one.
         """
-        failed_lookup: dict[str, Any] | None = None
-        failed_calculation: dict[str, Any] | None = None
+        failed_lookup: Calculation | None = None
+        failed_calculation: Calculation | None = None
         for calculation in calculations:
-            failure = None if calculation.result.get("status") == "ok" else calculation.result
-            if calculation.tool in LOOKUP_TOOLS:
+            failure = None if calculation.result.get("status") == "ok" else calculation
+            if calculation.kind == LOOKUP:
                 failed_lookup = failure
             else:
                 failed_calculation = failure
@@ -180,30 +181,21 @@ class Assistant:
         text: str,
         question: str,
         calculations: list[Calculation],
-        blocked: dict[str, Any],
+        blocked: Calculation,
     ) -> AssistantAnswer:
-        """No load is given. The model's wording is kept only if it adds no numbers."""
-        found = (
-            blocked.get("logged_sets")
-            or blocked.get("matching_sets")
-            or blocked.get("sets_in_that_week")
-            or ([blocked["set"]] if "set" in blocked else [])
-        )
-        lookups_only = [calc for calc in calculations if calc.tool in LOOKUP_TOOLS]
+        """No answer is given. The model's wording is kept only if it adds no numbers."""
+        lookups_only = [calc for calc in calculations if calc.kind == LOOKUP]
         if not text or unsupported_numbers(text, question, lookups_only):
-            lines = [blocked.get("message", NO_ANSWER)]
-            if found:
-                lines.append("Logged: " + "; ".join(item["description"] for item in found))
-            variations = blocked.get("variations_with_data")
-            if variations:
-                lines.append("Variations with logged sets: " + ", ".join(variations) + ".")
-            lines.append("Which set should I use?")
-            text = "\n".join(lines)
+            tool = self.toolbox.get(blocked.tool)
+            if tool and tool.explain and "message" in blocked.result:
+                text = tool.explain(blocked.result)
+            else:
+                text = blocked.result.get("message", NO_ANSWER)
         return AssistantAnswer(
             status="needs_clarification",
             answer=text,
             calculations=calculations,
-            flags=[blocked.get("status", "no_match")],
+            flags=[blocked.result.get("status", "no_match")],
         )
 
     def _retry(
@@ -232,23 +224,12 @@ class Assistant:
             return rewritten
         return ""
 
-    @staticmethod
-    def _template(calculations: list[Calculation]) -> str:
+    def _template(self, calculations: list[Calculation]) -> str:
         """A plain answer written from the tool results, for when the model's cannot be used."""
         for calculation in reversed(calculations):
-            result = calculation.result
-            if result.get("status") != "ok":
-                continue
-            if calculation.tool == "target_load":
-                target = result["target"]
-                return (
-                    f"Take {result['target_load_text']} for {target['reps']:g} reps at RPE "
-                    f"{target['rpe']:g}. That uses an estimated 1RM of {result['e1rm_text']}."
-                )
-            if calculation.tool == "estimate_e1rm":
-                return f"Your estimated 1RM is {result['e1rm_text']}."
-            if calculation.tool in LOOKUP_TOOLS:
-                return f"I found this logged set: {result['set']['description']}."
+            tool = self.toolbox.get(calculation.tool)
+            if calculation.result.get("status") == "ok" and tool and tool.summarize:
+                return tool.summarize(calculation.result)
         return ""
 
     def _answered(

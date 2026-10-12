@@ -25,6 +25,7 @@ from kiloplan.analytics.e1rm import (
 )
 from kiloplan.chatbot.assistant import Assistant
 from kiloplan.chatbot.llm import ChatModel, ModelUnavailableError, OllamaModel
+from kiloplan.chatbot.toolbox import Toolbox
 from kiloplan.chatbot.tools import ProgramTools
 from kiloplan.ingestion.coach_sheet import parse_workbook
 from kiloplan.storage.db import get_session
@@ -245,7 +246,7 @@ def ask_assistant(
     model: Annotated[ChatModel, Depends(get_chat_model)],
 ) -> AssistantResponse:
     """Answer a question about the lifter's stored program. Numbers come only from tools."""
-    assistant = Assistant(model, ProgramTools(session, request.lifter))
+    assistant = Assistant(model, Toolbox(ProgramTools(session, request.lifter)))
     try:
         answer = assistant.ask(request.question)
     except ModelUnavailableError as error:
