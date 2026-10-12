@@ -19,7 +19,7 @@ from kiloplan.analytics.e1rm import (
     weight_for_rpe,
 )
 from kiloplan.ingestion.lifts import COMPETITION
-from kiloplan.storage.models import Block, ProgramRow, Upload, Week
+from kiloplan.storage.models import Block, Lifter, PerformedSet, Upload, Week
 from kiloplan.storage.program_store import latest_upload
 
 KG_PER_LB = 0.45359237
@@ -53,41 +53,76 @@ def _show(kg: float) -> str:
     return f"{kg / KG_PER_LB:.1f} lb ({kg:.1f} kg)"
 
 
-def _rpe_text(row: ProgramRow) -> str:
-    if row.rpe_below_5:
+def _rpe_text(performed: PerformedSet) -> str:
+    if performed.rpe_below_5:
         return "<5"
-    return "not logged" if row.rpe is None else f"{row.rpe:g}"
+    return "not logged" if performed.rpe is None else f"{performed.rpe:g}"
 
 
-def describe_set(row: ProgramRow) -> Result:
+def describe_set(performed: PerformedSet) -> Result:
     """A logged set as the assistant sees it."""
+    row = performed.program_row
+    reps = row.reps_raw if row else f"{performed.reps or '?'}"
+    summary = (
+        f"{performed.movement_raw} {performed.sets or '?'}x{reps} at "
+        f"{_show(performed.load_kg)}, RPE {_rpe_text(performed)}"
+    )
+    described: Result = {
+        "set_id": performed.id,
+        "movement": performed.movement_raw,
+        "lift": performed.lift,
+        "variation": performed.variation,
+        "sets": performed.sets,
+        "reps": performed.reps,
+        "rpe": _rpe_text(performed),
+        **_loads("load", performed.load_kg),
+    }
+    if row is None:
+        day = performed.performed_on
+        when = f"logged on {day.isoformat()}" if day else "logged in the app"
+        return described | {
+            "date": day.isoformat() if day else None,
+            "description": f"{summary} ({when})",
+        }
     week, block = row.week, row.week.block
     where = f"block {block.block_index + 1}, {week.label}, {row.day_label}"
-    load = _show(row.load_kg) if row.load_kg is not None else "no load logged"
-    described: Result = {
-        "set_id": row.id,
+    return described | {
         "block": block.block_index + 1,
         "tab": block.sheet_name,
         "week": week.week_number,
         "week_label": week.label,
         "week_of": week.start_date.isoformat() if week.start_date else None,
         "day": row.day_label,
-        "movement": row.movement_raw,
-        "lift": row.lift,
-        "variation": row.variation,
-        "sets": row.sets,
-        "reps": row.reps,
-        "rpe": _rpe_text(row),
         "sheet_cell": row.sheet_cell,
         "issues": [issue.message for issue in row.issues],
-        "description": (
-            f"{row.movement_raw} {row.sets or '?'}x{row.reps_raw} at {load}, RPE {_rpe_text(row)} "
-            f"({where}; tab {block.sheet_name!r}, cell {row.sheet_cell})"
-        ),
+        "description": f"{summary} ({where}; tab {block.sheet_name!r}, cell {row.sheet_cell})",
     }
-    if row.load_kg is not None:
-        described |= _loads("load", row.load_kg)
-    return described
+
+
+def _week_number(performed: PerformedSet) -> int | None:
+    row = performed.program_row
+    return row.week.week_number if row else None
+
+
+def _block_number(performed: PerformedSet) -> int | None:
+    row = performed.program_row
+    return row.week.block.block_index + 1 if row else None
+
+
+def _week_key(performed: PerformedSet) -> tuple[Any, ...]:
+    """Identifies the training week a set belongs to: its program week, else its calendar week."""
+    row, day = performed.program_row, performed.performed_on
+    if row:
+        return "program", row.week_id
+    return ("app", *day.isocalendar()[:2]) if day else ("app", performed.id)
+
+
+def _day_key(performed: PerformedSet) -> tuple[Any, ...]:
+    """Identifies the training day a set belongs to."""
+    row, day = performed.program_row, performed.performed_on
+    if row:
+        return "program", row.week_id, row.day_order
+    return ("app", day) if day else ("app", performed.id)
 
 
 class ProgramTools:
@@ -100,48 +135,59 @@ class ProgramTools:
     def _upload(self) -> Upload | None:
         return latest_upload(self.session, self.lifter)
 
-    def _rows(self, lift: str, variation: str | None) -> list[ProgramRow]:
-        """The lifter's logged sets of one lift variation that have a load, newest first."""
-        upload = self._upload()
-        if upload is None:
-            return []
-        query = (
-            select(ProgramRow)
-            .join(Week)
+    def _lifter_id(self) -> int | None:
+        return self.session.scalar(select(Lifter.id).where(Lifter.name == self.lifter))
+
+    def _recency(self) -> Callable[[PerformedSet], tuple[int, ...]]:
+        """A sort key that puts a lifter's sets oldest first.
+
+        Sets from the program follow its week, day and row order. A set logged in the
+        app comes after the latest program week that had started by its date.
+        """
+        dated_weeks = self.session.execute(
+            select(Week.start_date, Week.sequence)
             .join(Block)
-            .where(
-                Block.upload_id == upload.id,
-                ProgramRow.lift == lift,
-                ProgramRow.variation == (variation or COMPETITION),
-                ProgramRow.load_kg.is_not(None),
-            )
-            .order_by(Week.sequence.desc(), ProgramRow.day_order.desc(), ProgramRow.row_order)
+            .join(Upload)
+            .where(Upload.lifter_id == self._lifter_id(), Week.start_date.is_not(None))
+        ).all()
+
+        def key(performed: PerformedSet) -> tuple[int, ...]:
+            row, day = performed.program_row, performed.performed_on
+            if row:
+                # rows are read top to bottom, so within a day the first row sorts newest
+                return row.week.sequence, 0, row.day_order, -row.row_order
+            sequence = max((seq for start, seq in dated_weeks if day and start <= day), default=-1)
+            return sequence, 1, day.toordinal() if day else 0, performed.id
+
+        return key
+
+    def _rows(self, lift: str, variation: str | None) -> list[PerformedSet]:
+        """The lifter's performed sets of one lift variation, newest first."""
+        query = select(PerformedSet).where(
+            PerformedSet.lifter_id == self._lifter_id(),
+            PerformedSet.lift == lift,
+            PerformedSet.variation == (variation or COMPETITION),
         )
-        return list(self.session.scalars(query))
+        return sorted(self.session.scalars(query), key=self._recency(), reverse=True)
 
     def _variations(self, lift: str) -> list[str]:
-        upload = self._upload()
-        if upload is None:
-            return []
         query = (
-            select(ProgramRow.variation)
-            .join(Week)
-            .join(Block)
-            .where(
-                Block.upload_id == upload.id,
-                ProgramRow.lift == lift,
-                ProgramRow.load_kg.is_not(None),
-            )
+            select(PerformedSet.variation)
+            .where(PerformedSet.lifter_id == self._lifter_id(), PerformedSet.lift == lift)
             .distinct()
         )
         return sorted(self.session.scalars(query))
+
+    def _has_sets(self) -> bool:
+        query = select(PerformedSet.id).where(PerformedSet.lifter_id == self._lifter_id()).limit(1)
+        return self.session.scalar(query) is not None
 
     def _check_lift(self, lift: str, variation: str | None) -> Result | None:
         """A no-data result, or None when this lift variation has logged sets."""
         if lift not in MAIN_LIFTS:
             message = f"lift must be one of {', '.join(MAIN_LIFTS)}"
             return {"status": "invalid_input", "message": message}
-        if self._upload() is None:
+        if self._upload() is None and not self._has_sets():
             return {"status": "no_program", "message": "This lifter has not uploaded a program."}
         if not self._rows(lift, variation):
             return {
@@ -168,9 +214,9 @@ class ProgramTools:
             return problem
         rows = self._rows(lift, variation)
         if block is not None:
-            rows = [row for row in rows if row.week.block.block_index + 1 == block]
+            rows = [row for row in rows if _block_number(row) == block]
         if week_number is not None:
-            rows = [row for row in rows if row.week.week_number == week_number]
+            rows = [row for row in rows if _week_number(row) == week_number]
         in_week = rows
         if reps is not None:
             rows = [row for row in rows if row.reps == reps]
@@ -181,9 +227,9 @@ class ProgramTools:
                 "sets_in_that_week": [describe_set(row) for row in in_week[:MAX_LISTED_SETS]],
             }
 
-        latest_week = rows[0].week_id
-        candidates = [row for row in rows if row.week_id == latest_week]
-        older_matches = len({row.week_id for row in rows}) - 1
+        latest_week = _week_key(rows[0])
+        candidates = [row for row in rows if _week_key(row) == latest_week]
+        older_matches = len({_week_key(row) for row in rows}) - 1
 
         if stated_load is not None:
             stated_kg = _to_kg(stated_load, unit)
@@ -253,12 +299,7 @@ class ProgramTools:
                 "sets_without_rpe": sum(row.rpe is None and not row.rpe_below_5 for row in rows),
             }
         # rows are newest first, so the first qualifying row fixes the week and day
-        newest = qualifying[0]
-        same_day = [
-            row
-            for row in qualifying
-            if row.week_id == newest.week_id and row.day_order == newest.day_order
-        ]
+        same_day = [row for row in qualifying if _day_key(row) == _day_key(qualifying[0])]
         top = max(same_day, key=lambda row: row.load_kg)
         return {
             "status": "ok",
@@ -278,13 +319,12 @@ class ProgramTools:
                 message = "Give either set_id, or load, reps and rpe."
                 return {"status": "invalid_input", "message": message}
             return _to_kg(load, unit), reps, rpe, None, "stated"
-        row = self.session.get(ProgramRow, set_id)
-        upload = self._upload()
-        if row is None or upload is None or row.week.block.upload_id != upload.id:
+        row = self.session.get(PerformedSet, set_id)
+        if row is None or row.lifter_id != self._lifter_id():
             return {"status": "no_match", "message": f"No logged set has set_id {set_id}."}
         described = describe_set(row)
-        if row.load_kg is None or not row.reps:
-            message = "That set has no usable load or rep count."
+        if not row.reps:
+            message = "That set has no usable rep count."
             return {"status": "cannot_calculate", "message": message, "set": described}
         if row.rpe is not None:
             return row.load_kg, row.reps, row.rpe, described, "logged"
