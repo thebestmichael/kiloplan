@@ -1,10 +1,8 @@
-from io import BytesIO
-
 import pytest
 from fastapi.testclient import TestClient
-from openpyxl import Workbook
 
 from kiloplan.api.main import app
+from workbooks import as_bytes, line, program_workbook
 
 client = TestClient(app)
 
@@ -69,45 +67,35 @@ def test_target_load_rejects_reps_beyond_brzycki_limit():
     assert "at most 36" in response.json()["detail"]
 
 
-def workbook_bytes():
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Block A"
-    for column, label, dates, load in (
-        (2, "Week 1", "7/13-19/26", 298),
-        (10, "Week 2", "7/20-26/26", 310),
-    ):
-        sheet.cell(row=1, column=column, value=label)
-        sheet.cell(row=2, column=column, value="Date")
-        sheet.cell(row=2, column=column + 1, value=dates)
-        header = [
-            "Day 1",
-            "Sets",
-            "Reps",
-            "Intensity",
-            "Target Load",
-            "Actual load",
-            "Last Set RPE",
-        ]
-        line = ["Squats", 1, 7, "@5", None, load, 11 if column == 10 else "<5"]
-        for offset, (title, value) in enumerate(zip(header, line, strict=True)):
-            sheet.cell(row=4, column=column + offset, value=title)
-            sheet.cell(row=5, column=column + offset, value=value)
-    workbook.create_sheet("Reference")
-    buffer = BytesIO()
-    workbook.save(buffer)
-    return buffer.getvalue()
+def upload(workbook, lifter=None):
+    params = {"lifter": lifter} if lifter else {}
+    files = {"file": ("program.xlsx", as_bytes(workbook).getvalue())}
+    return client.post("/api/program/upload", files=files, params=params)
 
 
-def test_parse_program():
-    response = client.post("/api/program/parse", files={"file": ("program.xlsx", workbook_bytes())})
+def small_program(top_set_load=298):
+    return program_workbook(
+        {
+            "Block A": [
+                ("Week 1", "7/13-19/26", {"Day 1": [line("Squats", 1, 7, top_set_load, "<5")]}),
+                ("Week 2", "7/20-26/26", {"Day 1": [line("Paused Squats", 1, 7, 310, 11)]}),
+            ],
+            "Reference": [],
+        }
+    )
+
+
+def test_upload_program_stores_and_returns_it():
+    response = upload(small_program())
     assert response.status_code == 200
     body = response.json()
+    assert body["lifter"] == "default"
     assert body["sheets"] == [
         {
             "name": "Block A",
-            "lines": 2,
+            "blocks": 1,
             "weeks": 2,
+            "lines": 2,
             "first_week": "2026-07-13",
             "last_week": "2026-07-20",
         }
@@ -115,16 +103,50 @@ def test_parse_program():
     assert body["skipped_sheets"] == ["Reference"]
     assert [(issue["sheet"], issue["cell"]) for issue in body["issues"]] == [("Block A", "J5")]
 
-    first = body["rows"][0]
-    assert (first["movement"], first["sets"], first["reps"]) == ("Squats", 1, 7)
-    assert first["week_start"] == "2026-07-13"
+    first, second = body["rows"]
+    assert (first["movement"], first["lift"], first["variation"]) == (
+        "Squats",
+        "squat",
+        "competition",
+    )
+    assert (first["block_index"], first["week_number"], first["week_start"]) == (0, 1, "2026-07-13")
     assert first["actual_load_kg"] == pytest.approx(298 * 0.45359237)
     assert (first["rpe"], first["rpe_below_5"]) == (None, True)
+    assert (second["lift"], second["variation"], second["week_number"]) == ("squat", "paused", 2)
 
 
-def test_parse_program_rejects_non_workbook():
-    response = client.post(
-        "/api/program/parse", files={"file": ("notes.xlsx", b"this is not a spreadsheet")}
-    )
+def test_get_program_returns_the_stored_upload():
+    assert client.get("/api/program").status_code == 404
+    uploaded = upload(small_program()).json()
+    response = client.get("/api/program")
+    assert response.status_code == 200
+    assert response.json() == uploaded
+
+
+def test_upload_replaces_the_lifters_previous_program():
+    upload(small_program(top_set_load=298))
+    upload(small_program(top_set_load=320))
+    rows = client.get("/api/program").json()["rows"]
+    assert len(rows) == 2
+    assert rows[0]["actual_load_kg"] == pytest.approx(320 * 0.45359237)
+
+
+def test_programs_are_kept_per_lifter():
+    upload(small_program(top_set_load=298), lifter="ana")
+    upload(small_program(top_set_load=320), lifter="ben")
+    ana = client.get("/api/program", params={"lifter": "ana"}).json()
+    assert ana["rows"][0]["actual_load_kg"] == pytest.approx(298 * 0.45359237)
+    assert client.get("/api/program").status_code == 404
+
+
+def test_upload_rejects_non_workbook():
+    files = {"file": ("notes.xlsx", b"this is not a spreadsheet")}
+    response = client.post("/api/program/upload", files=files)
     assert response.status_code == 400
     assert "Excel workbook" in response.json()["detail"]
+
+
+def test_upload_rejects_workbook_without_a_program():
+    response = upload(program_workbook({"Reference": []}))
+    assert response.status_code == 400
+    assert "No program lines" in response.json()["detail"]

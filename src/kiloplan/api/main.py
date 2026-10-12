@@ -1,13 +1,14 @@
 """FastAPI app. Run with: uv run uvicorn kiloplan.api.main:app --reload"""
 
-from datetime import date
+from datetime import date, datetime
 from io import BytesIO
-from typing import Literal
+from typing import Annotated, Literal
 from zipfile import BadZipFile
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, UploadFile
 from openpyxl.utils.exceptions import InvalidFileException
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from kiloplan.analytics.e1rm import (
     MAX_RPE,
@@ -21,11 +22,17 @@ from kiloplan.analytics.e1rm import (
     hybrid_weight,
     weight_for_rpe,
 )
-from kiloplan.ingestion.coach_sheet import Issue, SheetRow, parse_workbook
+from kiloplan.ingestion.coach_sheet import parse_workbook
+from kiloplan.storage.db import get_session
+from kiloplan.storage.models import Upload
+from kiloplan.storage.program_store import latest_upload, store_program
 
 app = FastAPI(title="KiloPlan")
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+DEFAULT_LIFTER = "default"
+
+DbSession = Annotated[Session, Depends(get_session)]
 
 FORMULAS = {
     "hybrid": (hybrid, hybrid_weight),
@@ -66,42 +73,118 @@ def target_load(request: TargetLoadRequest) -> TargetLoadResponse:
 
 class SheetSummary(BaseModel):
     name: str
-    lines: int
+    blocks: int
     weeks: int
+    lines: int
     first_week: date | None
     last_week: date | None
 
 
-class ProgramParseResponse(BaseModel):
+class ProgramIssueOut(BaseModel):
+    sheet: str
+    cell: str
+    message: str
+
+
+class ProgramRowOut(BaseModel):
+    id: int
+    block_index: int
+    sheet: str
+    cell: str
+    week_number: int | None
+    week_label: str
+    week_start: date | None
+    day_label: str
+    movement: str
+    lift: str
+    variation: str
+    sets: int | None
+    reps_raw: str
+    intensity_raw: str
+    target_load_raw: str
+    actual_load_raw: str
+    actual_load_kg: float | None
+    rpe: float | None
+    rpe_below_5: bool
+    assumed_kg: bool
+
+
+class ProgramResponse(BaseModel):
+    lifter: str
+    filename: str
+    uploaded_at: datetime
     sheets: list[SheetSummary]
     skipped_sheets: list[str]
-    issues: list[Issue]
-    rows: list[SheetRow]
+    note_count: int
+    issues: list[ProgramIssueOut]
+    rows: list[ProgramRowOut]
 
 
-def _summarise(rows: list[SheetRow]) -> list[SheetSummary]:
-    by_sheet: dict[str, list[SheetRow]] = {}
-    for row in rows:
-        by_sheet.setdefault(row.sheet, []).append(row)
-    summaries = []
-    for name, sheet_rows in by_sheet.items():
-        starts = [row.week_start for row in sheet_rows if row.week_start]
-        summaries.append(
+def _program_response(upload: Upload) -> ProgramResponse:
+    """The stored program, newest block first."""
+    sheets: dict[str, SheetSummary] = {}
+    rows: list[ProgramRowOut] = []
+    note_count = 0
+    for block in reversed(upload.blocks):
+        summary = sheets.setdefault(
+            block.sheet_name,
             SheetSummary(
-                name=name,
-                lines=len(sheet_rows),
-                # the movement column's letters differ for every week of a sheet
-                weeks=len({row.cell.rstrip("0123456789") for row in sheet_rows}),
-                first_week=min(starts, default=None),
-                last_week=max(starts, default=None),
-            )
+                name=block.sheet_name, blocks=0, weeks=0, lines=0, first_week=None, last_week=None
+            ),
         )
-    return summaries
+        summary.blocks += 1
+        for week in block.weeks:
+            summary.weeks += 1
+            summary.lines += len(week.rows)
+            note_count += len(week.notes)
+            if week.start_date:
+                summary.first_week = min(summary.first_week or week.start_date, week.start_date)
+                summary.last_week = max(summary.last_week or week.start_date, week.start_date)
+            rows.extend(
+                ProgramRowOut(
+                    id=row.id,
+                    block_index=block.block_index,
+                    sheet=block.sheet_name,
+                    cell=row.sheet_cell,
+                    week_number=week.week_number,
+                    week_label=week.label,
+                    week_start=week.start_date,
+                    day_label=row.day_label,
+                    movement=row.movement_raw,
+                    lift=row.lift,
+                    variation=row.variation,
+                    sets=row.sets,
+                    reps_raw=row.reps_raw,
+                    intensity_raw=row.intensity_raw,
+                    target_load_raw=row.target_load_raw,
+                    actual_load_raw=row.load_raw,
+                    actual_load_kg=row.load_kg,
+                    rpe=row.rpe,
+                    rpe_below_5=row.rpe_below_5,
+                    assumed_kg=row.assumed_kg,
+                )
+                for row in week.rows
+            )
+    return ProgramResponse(
+        lifter=upload.lifter.name,
+        filename=upload.filename,
+        uploaded_at=upload.uploaded_at,
+        sheets=list(sheets.values()),
+        skipped_sheets=upload.skipped_sheets,
+        note_count=note_count,
+        issues=[
+            ProgramIssueOut(sheet=issue.sheet, cell=issue.cell, message=issue.message)
+            for issue in upload.issues
+        ],
+        rows=rows,
+    )
 
 
-@app.post("/api/program/parse")
-def parse_program(file: UploadFile) -> ProgramParseResponse:
-    """Parse an uploaded coach spreadsheet and return what was read. Nothing is stored."""
+@app.post("/api/program/upload")
+def upload_program(
+    file: UploadFile, session: DbSession, lifter: str = DEFAULT_LIFTER
+) -> ProgramResponse:
+    """Parse an uploaded coach spreadsheet and store it, replacing the lifter's previous one."""
     content = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File is larger than 20 MB.")
@@ -110,9 +193,17 @@ def parse_program(file: UploadFile) -> ProgramParseResponse:
     except (BadZipFile, InvalidFileException, KeyError, OSError) as error:
         detail = "Could not read this file as an Excel workbook (.xlsx)."
         raise HTTPException(status_code=400, detail=detail) from error
-    return ProgramParseResponse(
-        sheets=_summarise(result.rows),
-        skipped_sheets=result.skipped_sheets,
-        issues=result.issues,
-        rows=result.rows,
-    )
+    if not result.rows:
+        detail = "No program lines found. Is this the coach's program spreadsheet?"
+        raise HTTPException(status_code=400, detail=detail)
+    upload = store_program(session, lifter, file.filename or "program.xlsx", result)
+    session.commit()
+    return _program_response(upload)
+
+
+@app.get("/api/program")
+def get_program(session: DbSession, lifter: str = DEFAULT_LIFTER) -> ProgramResponse:
+    upload = latest_upload(session, lifter)
+    if upload is None:
+        raise HTTPException(status_code=404, detail="No program uploaded yet.")
+    return _program_response(upload)
