@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,7 +14,13 @@ from kiloplan.chatbot.assistant import (
     numbers_in,
     unsupported_numbers,
 )
-from kiloplan.chatbot.llm import ModelTurn, ModelUnavailableError, ScriptedModel, ToolCall
+from kiloplan.chatbot.llm import (
+    ModelTurn,
+    ModelUnavailableError,
+    OllamaModel,
+    ScriptedModel,
+    ToolCall,
+)
 from kiloplan.chatbot.tools import BELOW_CHART_NOTE, ProgramTools
 from kiloplan.ingestion.coach_sheet import parse_workbook
 from kiloplan.storage.program_store import store_program
@@ -306,3 +313,16 @@ def test_api_reports_when_the_model_is_not_running():
     # the pain check does not need the model
     hurt = client.post("/api/assistant/ask", json={"question": "my back hurts after deadlifts"})
     assert (hurt.status_code, hurt.json()["status"]) == (200, "referred")
+
+
+@pytest.mark.skipif(
+    not os.environ.get("KILOPLAN_LIVE_LLM"), reason="set KILOPLAN_LIVE_LLM=1 with Ollama running"
+)
+def test_example_question_with_the_real_model(tools):
+    """Whatever the model does, the answer must be the right load or a question, never a guess."""
+    answer = Assistant(OllamaModel(), tools).ask(EXAMPLE_QUESTION)
+    assert unsupported_numbers(answer.answer, EXAMPLE_QUESTION, answer.calculations) == set()
+    if answer.status == "answered" and answer.basis_set:
+        assert answer.basis_set["sheet_cell"] == "J5"
+        assert "368.2" in answer.answer
+        assert BELOW_CHART_NOTE in answer.answer
