@@ -73,6 +73,10 @@ S3 (Parquet), Terraform, Docker.
   answer names the set used. If none qualifies, ask.
 - Never swap in a different lift variation without asking.
 - Missing, ambiguous or conflicting data: say so and ask, never guess.
+- Follow-ups: the client sends the earlier turns (at most 10) with each
+  question and the server stores no conversation. Numbers from earlier turns
+  may be repeated; tool results are not carried over, so sets are looked up
+  again. A pain mention anywhere in the conversation keeps the referral.
 - Pain or injury mentions: direct to a professional, no load advice, no model
   call.
 
