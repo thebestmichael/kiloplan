@@ -5,10 +5,14 @@ description = "Powerlifting data platform: logging, e1RM analytics, block progra
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastapi>=0.143.0",
+    "uvicorn[standard]>=0.54.0",
+]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pytest",
     "ruff",
 ]

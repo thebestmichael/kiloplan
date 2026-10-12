@@ -5,13 +5,18 @@ from kiloplan.analytics.e1rm import (
     brzycki_weight,
     epley,
     epley_weight,
+    hybrid,
+    hybrid_weight,
     round_to_increment,
     target_weight_from_pr,
     weight_for_rpe,
 )
 
 
-@pytest.mark.parametrize(("formula", "inverse"), [(epley, epley_weight), (brzycki, brzycki_weight)])
+@pytest.mark.parametrize(
+    ("formula", "inverse"),
+    [(epley, epley_weight), (brzycki, brzycki_weight), (hybrid, hybrid_weight)],
+)
 @pytest.mark.parametrize(("weight_kg", "reps"), [(100, 1), (100, 5), (142.5, 3), (60, 12)])
 def test_inverse_round_trips(formula, inverse, weight_kg, reps):
     assert inverse(formula(weight_kg, reps), reps) == pytest.approx(weight_kg)
@@ -32,14 +37,33 @@ def test_brzycki_weight_rejects_reps_above_limit():
 
 def test_weight_for_rpe():
     # triple at RPE 8 has 2 in reserve: Epley weight at 5 reps = 140 / (1 + 5/30)
-    assert weight_for_rpe(140, 3, 8) == pytest.approx(120.0)
-    assert weight_for_rpe(140, 1, 10) == pytest.approx(140.0)
+    assert weight_for_rpe(140, 3, 8, inverse=epley_weight) == pytest.approx(120.0)
+    assert weight_for_rpe(140, 1, 10, inverse=epley_weight) == pytest.approx(140.0)
 
 
-def test_target_weight_from_pr():
+def test_weight_for_rpe_defaults_to_hybrid():
+    # triple at RPE 8 = 5 theoretical reps: Brzycki weight = 144 * 32 / 36
+    assert weight_for_rpe(144, 3, 8) == pytest.approx(128.0)
+    # 8 reps at RPE 6 = 12 theoretical reps: Epley weight = 140 / 1.4
+    assert weight_for_rpe(140, 8, 6) == pytest.approx(100.0)
+
+
+def test_target_weight_from_pr_with_epley():
     # PR triple 180 @ RPE 9 -> e1RM 180 * (1 + 4/30) = 204
     # target triple @ RPE 5 -> 204 / (1 + 8/30)
-    assert target_weight_from_pr(180, 3, 9, 3, 5) == pytest.approx(161.0526, abs=1e-4)
+    result = target_weight_from_pr(180, 3, 9, 3, 5, formula=epley, inverse=epley_weight)
+    assert result == pytest.approx(161.0526, abs=1e-4)
+
+
+def test_target_weight_from_pr_defaults_to_hybrid():
+    # both sets are under 10 theoretical reps, so this matches Brzycki
+    assert target_weight_from_pr(180, 3, 9, 3, 5) == pytest.approx(158.1818, abs=1e-4)
+
+
+def test_target_weight_from_pr_across_hybrid_switch():
+    # top set 3 @ RPE 9 (4 theoretical reps, Brzycki): e1RM = 180 * 36 / 33
+    # backdown 8 @ RPE 6 (12 theoretical reps, Epley): e1RM / 1.4
+    assert target_weight_from_pr(180, 3, 9, 8, 6) == pytest.approx(140.2597, abs=1e-4)
 
 
 def test_target_weight_from_pr_same_set_returns_pr_weight():
