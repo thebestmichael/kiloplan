@@ -11,8 +11,28 @@ header h1 {
 }
 
 header p {
-  margin: 4px 0 24px;
+  margin: 4px 0 16px;
   color: var(--muted);
+}
+
+.unit-toggle {
+  display: inline-flex;
+  margin-bottom: 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.unit-toggle button {
+  padding: 6px 18px;
+  color: var(--text);
+  background: var(--surface);
+  border-radius: 0;
+}
+
+.unit-toggle button[aria-pressed='true'] {
+  color: var(--accent-text);
+  background: var(--accent);
 }
 
 form {

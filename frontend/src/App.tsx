@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import './App.css'
 
 type Formula = 'epley' | 'brzycki'
+type Unit = 'kg' | 'lb'
 
 interface TargetLoadResponse {
   e1rm_kg: number
@@ -15,7 +16,19 @@ interface ValidationIssue {
   msg: string
 }
 
-const INCREMENTS_KG = [1, 2.5, 5]
+const KG_PER_LB = 0.45359237
+const UNITS: Unit[] = ['kg', 'lb']
+const INCREMENTS: Record<Unit, number[]> = { kg: [1, 2.5, 5], lb: [2.5, 5, 10] }
+const DEFAULT_INCREMENT: Record<Unit, string> = { kg: '2.5', lb: '5' }
+
+// The API works in kg only; these convert at the display layer.
+function toKg(value: number, unit: Unit): number {
+  return unit === 'lb' ? value * KG_PER_LB : value
+}
+
+function fromKg(valueKg: number, unit: Unit): number {
+  return unit === 'lb' ? valueKg / KG_PER_LB : valueKg
+}
 
 function errorMessage(detail: unknown): string {
   if (typeof detail === 'string') return detail
@@ -27,11 +40,12 @@ function errorMessage(detail: unknown): string {
   return 'Something went wrong.'
 }
 
-function formatKg(value: number, digits: number): string {
-  return `${value.toFixed(digits)} kg`
+function formatWeight(valueKg: number, unit: Unit, digits: number): string {
+  return `${fromKg(valueKg, unit).toFixed(digits)} ${unit}`
 }
 
 function App() {
+  const [unit, setUnit] = useState<Unit>('kg')
   const [prWeight, setPrWeight] = useState('180')
   const [prReps, setPrReps] = useState('3')
   const [prRpe, setPrRpe] = useState('9')
@@ -44,6 +58,18 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  function changeUnit(next: Unit) {
+    if (next === unit) return
+    const weight = Number(prWeight)
+    if (prWeight !== '' && Number.isFinite(weight)) {
+      setPrWeight(String(Number(fromKg(toKg(weight, unit), next).toFixed(1))))
+    }
+    setIncrement(DEFAULT_INCREMENT[next])
+    setResult(null)
+    setError(null)
+    setUnit(next)
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setLoading(true)
@@ -53,13 +79,13 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          pr_weight_kg: Number(prWeight),
+          pr_weight_kg: toKg(Number(prWeight), unit),
           pr_reps: Number(prReps),
           pr_rpe: Number(prRpe),
           target_reps: Number(targetReps),
           target_rpe: Number(targetRpe),
           formula,
-          increment_kg: Number(increment),
+          increment_kg: toKg(Number(increment), unit),
         }),
       })
       const body = await response.json()
@@ -82,13 +108,25 @@ function App() {
       <header>
         <h1>KiloPlan</h1>
         <p>Work out what to load for a set, from a past set of the same lift.</p>
+        <div className="unit-toggle" role="group" aria-label="Weight unit">
+          {UNITS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={unit === option}
+              onClick={() => changeUnit(option)}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
       </header>
 
       <form onSubmit={handleSubmit}>
         <fieldset>
           <legend>Your best set</legend>
           <label>
-            Weight (kg)
+            Weight ({unit})
             <input
               type="number"
               min="0"
@@ -162,9 +200,9 @@ function App() {
           <label>
             Round to
             <select value={increment} onChange={(event) => setIncrement(event.target.value)}>
-              {INCREMENTS_KG.map((value) => (
+              {INCREMENTS[unit].map((value) => (
                 <option key={value} value={value}>
-                  {value} kg
+                  {value} {unit}
                 </option>
               ))}
             </select>
@@ -185,15 +223,15 @@ function App() {
       {result && (
         <section className="result" aria-live="polite">
           <p className="result-label">Load</p>
-          <p className="result-value">{formatKg(result.rounded_weight_kg, 1)}</p>
+          <p className="result-value">{formatWeight(result.rounded_weight_kg, unit, 1)}</p>
           <dl>
             <div>
               <dt>Exact</dt>
-              <dd>{formatKg(result.target_weight_kg, 2)}</dd>
+              <dd>{formatWeight(result.target_weight_kg, unit, 2)}</dd>
             </div>
             <div>
               <dt>Estimated 1RM</dt>
-              <dd>{formatKg(result.e1rm_kg, 1)}</dd>
+              <dd>{formatWeight(result.e1rm_kg, unit, 1)}</dd>
             </div>
           </dl>
         </section>
