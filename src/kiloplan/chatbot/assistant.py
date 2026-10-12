@@ -3,7 +3,7 @@
 The model only chooses tools and words the answer. Lookups, calculations and the
 checks below are done in code:
 
-- every number in an answer must come from a tool result or the lifter's question
+- every number in an answer must come from a tool result or the conversation so far
 - the logged set an answer is based on is always shown
 - an RPE below the chart range is always disclosed
 - a missing, ambiguous or conflicting lookup gets a question back, not a load
@@ -12,6 +12,7 @@ checks below are done in code:
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -56,6 +57,14 @@ NO_ANSWER = (
 NUMBER = re.compile(r"(?<![A-Za-z\d.])\d+(?:\.\d+)?")
 ONE_REP_MAX = re.compile(r"\b1\s*-?\s*(rm|rep max)\b", re.IGNORECASE)
 LIST_MARKER = re.compile(r"^\s*\d+[.)]\s", re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class Turn:
+    """An earlier message of the conversation. `role` is user or assistant."""
+
+    role: str
+    content: str
 
 
 @dataclass
@@ -116,16 +125,25 @@ class Assistant:
         self.model = model
         self.toolbox = toolbox
 
-    def ask(self, question: str) -> AssistantAnswer:
-        if mentions_pain(question):
+    def ask(self, question: str, history: Sequence[Turn] = ()) -> AssistantAnswer:
+        """Answer a question. `history` is the conversation before it, oldest first.
+
+        Nothing is remembered between calls: tool results from earlier turns are gone,
+        so a follow-up looks its sets up again.
+        """
+        asked = [turn.content for turn in history if turn.role == "user"] + [question]
+        if any(mentions_pain(text) for text in asked):
             return AssistantAnswer(
                 status="referred", answer=PAIN_REFERRAL, flags=["pain_or_injury"]
             )
 
         messages: list[Message] = [
             {"role": "system", "content": SYSTEM_PROMPT + self.toolbox.instructions},
+            *({"role": turn.role, "content": turn.content} for turn in history),
             {"role": "user", "content": question},
         ]
+        # earlier answers were checked when they were given, so their numbers may be repeated
+        question = "\n".join([*(turn.content for turn in history), question])
         calculations: list[Calculation] = []
         text = self._run(messages, calculations)
 
