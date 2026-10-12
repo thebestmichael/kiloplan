@@ -218,3 +218,21 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- KiloPlan ---
+# Environment files (keep the example template)
+.env.*
+!.env.example
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+!*.tfvars.example
