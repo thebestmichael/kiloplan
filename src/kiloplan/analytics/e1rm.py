@@ -16,6 +16,11 @@ def _validate(weight_kg: float, reps: float) -> None:
         raise ValueError(f"reps must be at least 1, got {reps}")
 
 
+def _validate_rpe(rpe: float) -> None:
+    if not MIN_RPE <= rpe <= MAX_RPE:
+        raise ValueError(f"rpe must be between {MIN_RPE} and {MAX_RPE}, got {rpe}")
+
+
 def epley(weight_kg: float, reps: float) -> float:
     """Epley estimate: weight * (1 + reps / 30). A single rep is its own 1RM."""
     _validate(weight_kg, reps)
@@ -34,6 +39,54 @@ def brzycki(weight_kg: float, reps: float) -> float:
 
 def e1rm_from_rpe(weight_kg: float, reps: float, rpe: float, formula: E1rmFormula = epley) -> float:
     """Estimate 1RM from a submaximal set by adding reps in reserve (10 - RPE) to reps."""
-    if not MIN_RPE <= rpe <= MAX_RPE:
-        raise ValueError(f"rpe must be between {MIN_RPE} and {MAX_RPE}, got {rpe}")
+    _validate_rpe(rpe)
     return formula(weight_kg, reps + (MAX_RPE - rpe))
+
+
+def epley_weight(e1rm_kg: float, reps: float) -> float:
+    """Inverse of epley: the weight that gives this e1RM at the given reps."""
+    _validate(e1rm_kg, reps)
+    if reps == 1:
+        return e1rm_kg
+    return e1rm_kg / (1 + reps / 30)
+
+
+def brzycki_weight(e1rm_kg: float, reps: float) -> float:
+    """Inverse of brzycki: the weight that gives this e1RM at the given reps."""
+    _validate(e1rm_kg, reps)
+    if reps > BRZYCKI_MAX_REPS:
+        raise ValueError(f"brzycki supports at most {BRZYCKI_MAX_REPS} reps, got {reps}")
+    return e1rm_kg * (37 - reps) / 36
+
+
+def weight_for_rpe(
+    e1rm_kg: float, reps: float, rpe: float, inverse: E1rmFormula = epley_weight
+) -> float:
+    """Weight to load for a set of `reps` at the target RPE, given an e1RM."""
+    _validate_rpe(rpe)
+    return inverse(e1rm_kg, reps + (MAX_RPE - rpe))
+
+
+def target_weight_from_pr(
+    pr_weight_kg: float,
+    pr_reps: float,
+    pr_rpe: float,
+    target_reps: float,
+    target_rpe: float,
+    formula: E1rmFormula = epley,
+    inverse: E1rmFormula = epley_weight,
+) -> float:
+    """Weight for a target set, derived from a past set of the same lift variation.
+
+    `formula` and `inverse` must be a matching pair (epley/epley_weight or
+    brzycki/brzycki_weight).
+    """
+    e1rm_kg = e1rm_from_rpe(pr_weight_kg, pr_reps, pr_rpe, formula)
+    return weight_for_rpe(e1rm_kg, target_reps, target_rpe, inverse)
+
+
+def round_to_increment(weight_kg: float, increment_kg: float = 2.5) -> float:
+    """Round to the nearest loadable weight, e.g. 2.5 kg jumps."""
+    if increment_kg <= 0:
+        raise ValueError(f"increment_kg must be positive, got {increment_kg}")
+    return round(weight_kg / increment_kg) * increment_kg
