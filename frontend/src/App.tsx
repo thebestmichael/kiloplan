@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 
-type Formula = 'hybrid' | 'epley' | 'brzycki'
 type Unit = 'kg' | 'lb'
 type Theme = 'light' | 'dark'
 
@@ -18,11 +17,6 @@ interface ValidationIssue {
 const DEBOUNCE_MS = 200
 const KG_PER_LB = 0.45359237
 const UNITS: Unit[] = ['kg', 'lb']
-const FORMULAS: { value: Formula; label: string }[] = [
-  { value: 'hybrid', label: 'Hybrid' },
-  { value: 'epley', label: 'Epley' },
-  { value: 'brzycki', label: 'Brzycki' },
-]
 
 // The API works in kg only; these convert at the display layer.
 function toKg(value: number, unit: Unit): number {
@@ -66,7 +60,6 @@ function App() {
   const [prRpe, setPrRpe] = useState('9')
   const [targetReps, setTargetReps] = useState('3')
   const [targetRpe, setTargetRpe] = useState('5')
-  const [formula, setFormula] = useState<Formula>('hybrid')
 
   const [result, setResult] = useState<TargetLoadResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -97,7 +90,6 @@ function App() {
         pr_rpe: Number(prRpe),
         target_reps: Number(targetReps),
         target_rpe: Number(targetRpe),
-        formula,
       })
     : null
 
@@ -147,18 +139,6 @@ function App() {
                 onClick={() => changeUnit(option)}
               >
                 {option}
-              </button>
-            ))}
-          </div>
-          <div className="segmented" role="group" aria-label="Formula">
-            {FORMULAS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={formula === option.value}
-                onClick={() => setFormula(option.value)}
-              >
-                {option.label}
               </button>
             ))}
           </div>
