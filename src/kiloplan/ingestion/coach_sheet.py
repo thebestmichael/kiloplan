@@ -18,6 +18,7 @@ from openpyxl.utils.datetime import to_excel
 from openpyxl.worksheet.worksheet import Worksheet
 
 from kiloplan.analytics.e1rm import hybrid
+from kiloplan.ingestion.lifts import classify
 
 KG_PER_LB = 0.45359237
 MIN_RPE = 5.0
@@ -47,8 +48,6 @@ COLUMN_LABELS = {
 # Loads are logged in pounds, but squat, bench and deadlift entries are sometimes
 # typed in kg. An entry is read as kg when its e1RM as pounds is implausibly low for
 # the movement in that block, and its e1RM as kg lands near the block's best.
-KG_LIFT_KEYWORDS = ("squat", "bench", "deadlift")
-KG_ACCESSORY_KEYWORDS = ("belt", "hack", "pendulum", "split", "bulgarian", "db", "rdl")
 KG_MIN_SAMPLES = 4
 KG_MIN_BEST_E1RM_LB = 200.0
 KG_E1RM_RANGE = (0.75, 1.10)
@@ -64,6 +63,7 @@ class SheetRow:
 
     sheet: str
     cell: str
+    week_index: int
     week_label: str
     week_start: date | None
     week_end: date | None
@@ -82,6 +82,26 @@ class SheetRow:
 
 
 @dataclass(frozen=True)
+class SheetWeek:
+    """One week of a tab. `week_index` counts the tab's weeks from the left, from 0."""
+
+    sheet: str
+    week_index: int
+    label: str
+    start: date | None
+    end: date | None
+
+
+@dataclass(frozen=True)
+class SheetNote:
+    sheet: str
+    cell: str
+    week_index: int
+    day_label: str
+    text: str
+
+
+@dataclass(frozen=True)
 class Issue:
     sheet: str
     cell: str
@@ -91,6 +111,8 @@ class Issue:
 @dataclass
 class ParseResult:
     rows: list[SheetRow] = field(default_factory=list)
+    weeks: list[SheetWeek] = field(default_factory=list)
+    notes: list[SheetNote] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
     skipped_sheets: list[str] = field(default_factory=list)
 
@@ -246,11 +268,9 @@ def _parse_block(
     sheet: Worksheet,
     label: Cell,
     last_column: int,
-    week_start: date | None,
-    week_end: date | None,
+    week: SheetWeek,
     result: ParseResult,
 ) -> None:
-    week_label = _text(label.value)
     columns: dict[str, int] = {}
     day_label = ""
     movement = ""
@@ -283,6 +303,14 @@ def _parse_block(
         if first_text.lower().startswith("notes") or movement_text.lower().startswith("notes"):
             in_notes = True
         if in_notes:
+            texts = [(cell, _text(cell.value)) for cell in row]
+            texts = [(cell, text) for cell, text in texts if text and _label_key(text) != "notes"]
+            if texts:
+                note = " ".join(text for _, text in texts)
+                anchor = texts[0][0].coordinate
+                result.notes.append(
+                    SheetNote(sheet.title, anchor, week.week_index, day_label, note)
+                )
             continue
         if movement_text:
             movement = movement_text
@@ -301,9 +329,10 @@ def _parse_block(
             SheetRow(
                 sheet=sheet.title,
                 cell=anchor,
-                week_label=week_label,
-                week_start=week_start,
-                week_end=week_end,
+                week_index=week.week_index,
+                week_label=week.label,
+                week_start=week.start,
+                week_end=week.end,
                 day_label=day_label,
                 movement=movement,
                 sets=_whole_number(_column_value(row, columns, "sets")),
@@ -334,15 +363,9 @@ def _e1rm_floor_lb(row: SheetRow) -> float | None:
     return hybrid(row.actual_load_kg / KG_PER_LB, row.reps + (MAX_RPE - rpe))
 
 
-def _is_main_lift(key: str) -> bool:
-    return any(word in key for word in KG_LIFT_KEYWORDS) and not any(
-        word in key.split() for word in KG_ACCESSORY_KEYWORDS
-    )
-
-
-def _session_key(row: SheetRow) -> tuple[str, str, str]:
-    """Identifies one movement on one day: the column letters pin down the week."""
-    return _movement_key(row.movement), row.cell.rstrip("0123456789"), row.day_label
+def _session_key(row: SheetRow) -> tuple[str, int, str]:
+    """Identifies one movement on one day of one week."""
+    return _movement_key(row.movement), row.week_index, row.day_label
 
 
 def _apply_kg_heuristic(rows: list[SheetRow], issues: list[Issue]) -> list[SheetRow]:
@@ -358,7 +381,7 @@ def _apply_kg_heuristic(rows: list[SheetRow], issues: list[Issue]) -> list[Sheet
             estimates[_movement_key(row.movement)].append(estimate)
 
     low, high = KG_E1RM_RANGE
-    looks_like_kg: dict[tuple[str, str, str], list[bool]] = defaultdict(list)
+    looks_like_kg: dict[tuple[str, int, str], list[bool]] = defaultdict(list)
     for row in rows:
         key = _movement_key(row.movement)
         estimate = _e1rm_floor_lb(row)
@@ -366,7 +389,7 @@ def _apply_kg_heuristic(rows: list[SheetRow], issues: list[Issue]) -> list[Sheet
         if estimate is None:
             continue
         looks_like_kg[_session_key(row)].append(
-            _is_main_lift(key)
+            classify(key).is_main
             and len(same_movement) >= KG_MIN_SAMPLES
             and (best := max(same_movement)) >= KG_MIN_BEST_E1RM_LB
             and low * best <= estimate / KG_PER_LB <= high * best
@@ -398,8 +421,13 @@ def parse_workbook(source: str | Path | BinaryIO) -> ParseResult:
             continue
         sheet_result = ParseResult()
         dates = _week_dates(sheet, blocks, sheet_result.issues)
-        for (label, last_column), (week_start, week_end) in zip(blocks, dates, strict=True):
-            _parse_block(sheet, label, last_column, week_start, week_end, sheet_result)
+        for index, ((label, last_column), (start, end)) in enumerate(
+            zip(blocks, dates, strict=True)
+        ):
+            week = SheetWeek(sheet.title, index, _text(label.value), start, end)
+            result.weeks.append(week)
+            _parse_block(sheet, label, last_column, week, sheet_result)
+        result.notes.extend(sheet_result.notes)
         result.issues.extend(sheet_result.issues)
         result.rows.extend(_apply_kg_heuristic(sheet_result.rows, result.issues))
     return result

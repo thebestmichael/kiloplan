@@ -9,33 +9,7 @@ from kiloplan.ingestion.coach_sheet import (
     _parse_week_dates,
     parse_workbook,
 )
-
-OLD_HEADER = ["Sets", "Reps", "Intensity ", "Target Load", "Actual load", "Last Set RPE"]
-NEW_HEADER = ["Movement ", "SET", "REPS", "INTENSITY", "TARGET LOAD", "TRUE LOAD", "RPE(LAST SET)"]
-
-
-def put(sheet, row, column, values):
-    for offset, value in enumerate(values):
-        sheet.cell(row=row, column=column + offset, value=value)
-
-
-def add_old_week(sheet, column, label, dates, days):
-    """Older tab layout: "Day N" header, movement in the day column, 8 columns per week."""
-    put(sheet, 1, column, [label])
-    put(sheet, 2, column, ["Date", dates])
-    row = 4
-    for day_label, lines in days:
-        put(sheet, row, column, [day_label, *OLD_HEADER])
-        for line in lines:
-            row += 1
-            put(sheet, row, column, line)
-        row += 3
-
-
-def save(workbook, tmp_path):
-    path = tmp_path / "program.xlsx"
-    workbook.save(path)
-    return path
+from workbooks import NEW_HEADER, add_old_week, put, save
 
 
 def lb(pounds):
@@ -104,6 +78,20 @@ def test_old_layout_rows(old_layout):
 
     assert bench.week_start == date(2026, 7, 13)
     assert result.rows[-1].week_start == date(2026, 7, 20)
+
+
+def test_old_layout_weeks_and_notes(old_layout):
+    result = parse_workbook(old_layout)
+    assert [(week.sheet, week.week_index, week.label, week.start) for week in result.weeks] == [
+        ("Block A", 0, "Week 1", date(2026, 7, 13)),
+        ("Block A", 1, "Week 2", date(2026, 7, 20)),
+    ]
+    assert [row.week_index for row in result.rows] == [0, 0, 0, 0, 1]
+    # the text beside "Notes" and everything under it, up to the next day
+    assert [(note.week_index, note.day_label, note.text) for note in result.notes] == [
+        (0, "Day 1", "Low back extension"),
+        (0, "Day 1", "after the notes 1 1 999 9"),
+    ]
 
 
 @pytest.fixture
