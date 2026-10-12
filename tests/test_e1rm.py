@@ -1,6 +1,6 @@
 import pytest
 
-from kiloplan.analytics.e1rm import brzycki, e1rm_from_rpe, epley
+from kiloplan.analytics.e1rm import brzycki, e1rm_from_rpe, epley, hybrid
 
 
 @pytest.mark.parametrize(
@@ -51,8 +51,38 @@ def test_formulas_reject_invalid_input(formula, weight_kg, reps):
         (100, 1, 10, 100.0),
     ],
 )
-def test_e1rm_from_rpe(weight_kg, reps, rpe, expected):
-    assert e1rm_from_rpe(weight_kg, reps, rpe) == pytest.approx(expected, abs=1e-4)
+def test_e1rm_from_rpe_with_epley(weight_kg, reps, rpe, expected):
+    assert e1rm_from_rpe(weight_kg, reps, rpe, formula=epley) == pytest.approx(expected, abs=1e-4)
+
+
+@pytest.mark.parametrize(
+    ("weight_kg", "reps", "expected"),
+    [
+        (100, 1, 100.0),  # Brzycki side
+        (100, 5, 112.5),
+        (100, 10, 133.3333),  # switch point: both formulas agree
+        (100, 10.5, 135.0),  # Epley side
+        (100, 12, 140.0),
+    ],
+)
+def test_hybrid(weight_kg, reps, expected):
+    assert hybrid(weight_kg, reps) == pytest.approx(expected, abs=1e-4)
+
+
+def test_hybrid_is_continuous_at_switch():
+    assert hybrid(100, 10) == pytest.approx(hybrid(100, 10.001), abs=0.01)
+    assert brzycki(100, 10) == pytest.approx(epley(100, 10))
+
+
+def test_hybrid_handles_reps_beyond_brzycki_limit():
+    assert hybrid(100, 40) == pytest.approx(epley(100, 40))
+
+
+def test_e1rm_from_rpe_defaults_to_hybrid():
+    # 5 reps @ RPE 8 = 7 theoretical reps: Brzycki
+    assert e1rm_from_rpe(100, 5, 8) == pytest.approx(120.0)
+    # 8 reps @ RPE 6 = 12 theoretical reps: Epley
+    assert e1rm_from_rpe(100, 8, 6) == pytest.approx(140.0)
 
 
 def test_e1rm_from_rpe_with_brzycki():
