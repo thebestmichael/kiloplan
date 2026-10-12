@@ -36,12 +36,16 @@ S3 (Parquet), Terraform, Docker.
 ## Layout
 - src/kiloplan/analytics/e1rm.py: e1RM formulas and target load
 - src/kiloplan/ingestion/: coach spreadsheet parser, lift classifier
-- src/kiloplan/storage/: models, engine, program store
+- src/kiloplan/storage/: models, engine, migrations, program store
 - src/kiloplan/chatbot/: tools, model interface, assistant
 - src/kiloplan/api/main.py: FastAPI app
 - tests/workbooks.py: builders for synthetic coach workbooks
 
 ## Conventions
+- Program rows hold the prescription. What the lifter actually lifted lives in
+  performed_sets (lifter, date, lift, variation, load in kg, RPE, source). A
+  spreadsheet upload fills it and replaces only its own sets; in-app logging
+  will write to the same table. The assistant's tools read performed_sets only.
 - Store all weights in kg. Convert only at the display layer and in tool results.
 - Type hints on all calculation code. Tests for every formula.
 - SQL transformations go in dbt. Python handles API calls, progression logic and
