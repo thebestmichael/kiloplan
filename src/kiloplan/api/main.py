@@ -1,8 +1,9 @@
 """FastAPI app. Run with: uv run uvicorn kiloplan.api.main:app --reload"""
 
 from datetime import date, datetime
+from functools import cache
 from io import BytesIO
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from zipfile import BadZipFile
 
 from fastapi import Depends, FastAPI, HTTPException, UploadFile
@@ -22,6 +23,9 @@ from kiloplan.analytics.e1rm import (
     hybrid_weight,
     weight_for_rpe,
 )
+from kiloplan.chatbot.assistant import Assistant
+from kiloplan.chatbot.llm import ChatModel, ModelUnavailableError, OllamaModel
+from kiloplan.chatbot.tools import ProgramTools
 from kiloplan.ingestion.coach_sheet import parse_workbook
 from kiloplan.storage.db import get_session
 from kiloplan.storage.models import Upload
@@ -207,3 +211,52 @@ def get_program(session: DbSession, lifter: str = DEFAULT_LIFTER) -> ProgramResp
     if upload is None:
         raise HTTPException(status_code=404, detail="No program uploaded yet.")
     return _program_response(upload)
+
+
+@cache
+def get_chat_model() -> ChatModel:
+    """The assistant's model. Swap the provider here."""
+    return OllamaModel()
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    lifter: str = DEFAULT_LIFTER
+
+
+class CalculationOut(BaseModel):
+    tool: str
+    arguments: dict[str, Any]
+    result: dict[str, Any]
+
+
+class AssistantResponse(BaseModel):
+    status: Literal["answered", "needs_clarification", "referred"]
+    answer: str
+    basis_set: dict[str, Any] | None
+    calculations: list[CalculationOut]
+    flags: list[str]
+
+
+@app.post("/api/assistant/ask")
+def ask_assistant(
+    request: AskRequest,
+    session: DbSession,
+    model: Annotated[ChatModel, Depends(get_chat_model)],
+) -> AssistantResponse:
+    """Answer a question about the lifter's stored program. Numbers come only from tools."""
+    assistant = Assistant(model, ProgramTools(session, request.lifter))
+    try:
+        answer = assistant.ask(request.question)
+    except ModelUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return AssistantResponse(
+        status=answer.status,
+        answer=answer.answer,
+        basis_set=answer.basis_set,
+        calculations=[
+            CalculationOut(tool=calc.tool, arguments=calc.arguments, result=calc.result)
+            for calc in answer.calculations
+        ],
+        flags=answer.flags,
+    )
