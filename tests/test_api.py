@@ -1,5 +1,8 @@
+from io import BytesIO
+
 import pytest
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 
 from kiloplan.api.main import app
 
@@ -64,3 +67,64 @@ def test_target_load_rejects_reps_beyond_brzycki_limit():
     )
     assert response.status_code == 422
     assert "at most 36" in response.json()["detail"]
+
+
+def workbook_bytes():
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Block A"
+    for column, label, dates, load in (
+        (2, "Week 1", "7/13-19/26", 298),
+        (10, "Week 2", "7/20-26/26", 310),
+    ):
+        sheet.cell(row=1, column=column, value=label)
+        sheet.cell(row=2, column=column, value="Date")
+        sheet.cell(row=2, column=column + 1, value=dates)
+        header = [
+            "Day 1",
+            "Sets",
+            "Reps",
+            "Intensity",
+            "Target Load",
+            "Actual load",
+            "Last Set RPE",
+        ]
+        line = ["Squats", 1, 7, "@5", None, load, 11 if column == 10 else "<5"]
+        for offset, (title, value) in enumerate(zip(header, line, strict=True)):
+            sheet.cell(row=4, column=column + offset, value=title)
+            sheet.cell(row=5, column=column + offset, value=value)
+    workbook.create_sheet("Reference")
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+def test_parse_program():
+    response = client.post("/api/program/parse", files={"file": ("program.xlsx", workbook_bytes())})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sheets"] == [
+        {
+            "name": "Block A",
+            "lines": 2,
+            "weeks": 2,
+            "first_week": "2026-07-13",
+            "last_week": "2026-07-20",
+        }
+    ]
+    assert body["skipped_sheets"] == ["Reference"]
+    assert [(issue["sheet"], issue["cell"]) for issue in body["issues"]] == [("Block A", "J5")]
+
+    first = body["rows"][0]
+    assert (first["movement"], first["sets"], first["reps"]) == ("Squats", 1, 7)
+    assert first["week_start"] == "2026-07-13"
+    assert first["actual_load_kg"] == pytest.approx(298 * 0.45359237)
+    assert (first["rpe"], first["rpe_below_5"]) == (None, True)
+
+
+def test_parse_program_rejects_non_workbook():
+    response = client.post(
+        "/api/program/parse", files={"file": ("notes.xlsx", b"this is not a spreadsheet")}
+    )
+    assert response.status_code == 400
+    assert "Excel workbook" in response.json()["detail"]
