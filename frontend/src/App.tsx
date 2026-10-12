@@ -128,7 +128,7 @@ function App() {
     <main>
       <header>
         <h1>KiloPlan</h1>
-        <p>Work out what to load for a set, from a past set of the same lift.</p>
+        <p>Calculate target weights based on Rate of Perceived Exertion</p>
         <div className="toolbar">
           <div className="segmented" role="group" aria-label="Weight unit">
             {UNITS.map((option) => (
@@ -227,7 +227,7 @@ function App() {
           <p className="result-value">{formatWeight(result.target_weight_kg, unit, 1)}</p>
           <dl>
             <div>
-              <dt>Estimated 1RM</dt>
+              <dt>Estimated 1RM:</dt>
               <dd>{formatWeight(result.e1rm_kg, unit, 1)}</dd>
             </div>
           </dl>
