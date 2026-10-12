@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import type { FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
 
 type Formula = 'epley' | 'brzycki'
@@ -17,6 +16,7 @@ interface ValidationIssue {
   msg: string
 }
 
+const DEBOUNCE_MS = 200
 const KG_PER_LB = 0.45359237
 const UNITS: Unit[] = ['kg', 'lb']
 const INCREMENTS: Record<Unit, number[]> = { kg: [1, 2.5, 5], lb: [2.5, 5, 10] }
@@ -69,7 +69,6 @@ function App() {
 
   const [result, setResult] = useState<TargetLoadResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
 
   function toggleTheme() {
     const next: Theme = theme === 'dark' ? 'light' : 'dark'
@@ -85,43 +84,54 @@ function App() {
       setPrWeight(String(Number(fromKg(toKg(weight, unit), next).toFixed(1))))
     }
     setIncrement(DEFAULT_INCREMENT[next])
-    setResult(null)
-    setError(null)
     setUnit(next)
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setLoading(true)
-    setError(null)
-    try {
-      const response = await fetch('/api/target-load', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pr_weight_kg: toKg(Number(prWeight), unit),
-          pr_reps: Number(prReps),
-          pr_rpe: Number(prRpe),
-          target_reps: Number(targetReps),
-          target_rpe: Number(targetRpe),
-          formula,
-          increment_kg: toKg(Number(increment), unit),
-        }),
+  // null until every field holds a number; range checks are left to the API
+  const fields = [prWeight, prReps, prRpe, targetReps, targetRpe]
+  const complete = fields.every((value) => value !== '' && Number.isFinite(Number(value)))
+  const requestBody = complete
+    ? JSON.stringify({
+        pr_weight_kg: toKg(Number(prWeight), unit),
+        pr_reps: Number(prReps),
+        pr_rpe: Number(prRpe),
+        target_reps: Number(targetReps),
+        target_rpe: Number(targetRpe),
+        formula,
+        increment_kg: toKg(Number(increment), unit),
       })
-      const body = await response.json()
-      if (!response.ok) {
+    : null
+
+  useEffect(() => {
+    if (requestBody === null) return
+    const controller = new AbortController()
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch('/api/target-load', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: requestBody,
+          signal: controller.signal,
+        })
+        const body = await response.json()
+        if (response.ok) {
+          setResult(body as TargetLoadResponse)
+          setError(null)
+        } else {
+          setResult(null)
+          setError(errorMessage(body.detail))
+        }
+      } catch {
+        if (controller.signal.aborted) return
         setResult(null)
-        setError(errorMessage(body.detail))
-        return
+        setError('Could not reach the API. Is it running on port 8000?')
       }
-      setResult(body as TargetLoadResponse)
-    } catch {
-      setResult(null)
-      setError('Could not reach the API. Is it running on port 8000?')
-    } finally {
-      setLoading(false)
+    }, DEBOUNCE_MS)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
     }
-  }
+  }, [requestBody])
 
   return (
     <main>
@@ -147,7 +157,7 @@ function App() {
         </div>
       </header>
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={(event) => event.preventDefault()}>
         <fieldset>
           <legend>Your best set</legend>
           <label>
@@ -233,19 +243,15 @@ function App() {
             </select>
           </label>
         </fieldset>
-
-        <button type="submit" disabled={loading}>
-          {loading ? 'Calculating…' : 'Calculate'}
-        </button>
       </form>
 
-      {error && (
+      {complete && error && (
         <p className="error" role="alert">
           {error}
         </p>
       )}
 
-      {result && (
+      {complete && result && (
         <section className="result" aria-live="polite">
           <p className="result-label">Load</p>
           <p className="result-value">{formatWeight(result.rounded_weight_kg, unit, 1)}</p>
