@@ -34,23 +34,68 @@ header p {
   border: 1px solid var(--border);
 }
 
-.segmented {
-  display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.segmented button {
-  padding: 6px 14px;
-  color: var(--text);
+.unit-switch {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  width: 112px;
+  padding: 4px;
+  font-weight: 600;
   background: var(--surface);
-  border-radius: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
 }
 
-.segmented button[aria-pressed='true'] {
-  color: var(--accent-text);
+.unit-switch-thumb {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc(50% - 4px);
   background: var(--accent);
+  border-radius: 999px;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 25%);
+  /* overshoots slightly so the thumb bounces into place */
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.unit-switch[data-unit='lb'] .unit-switch-thumb {
+  transform: translateX(100%);
+}
+
+.unit-switch:hover .unit-switch-thumb {
+  transform: scale(1.06);
+}
+
+.unit-switch[data-unit='lb']:hover .unit-switch-thumb {
+  transform: translateX(100%) scale(1.06);
+}
+
+.unit-switch:active .unit-switch-thumb {
+  transform: scale(1.2, 0.85);
+}
+
+.unit-switch[data-unit='lb']:active .unit-switch-thumb {
+  transform: translateX(100%) scale(1.2, 0.85);
+}
+
+.unit-switch-label {
+  position: relative;
+  padding: 4px 0;
+  color: var(--muted);
+  transition: color 0.25s;
+}
+
+.unit-switch[data-unit='kg'] .unit-switch-label:nth-of-type(2),
+.unit-switch[data-unit='lb'] .unit-switch-label:nth-of-type(3) {
+  color: var(--accent-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .unit-switch-thumb,
+  .unit-switch-label {
+    transition: none;
+  }
 }
 
 form {

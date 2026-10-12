@@ -16,7 +16,6 @@ interface ValidationIssue {
 
 const DEBOUNCE_MS = 200
 const KG_PER_LB = 0.45359237
-const UNITS: Unit[] = ['kg', 'lb']
 
 // The API works in kg only; these convert at the display layer.
 function toKg(value: number, unit: Unit): number {
@@ -130,18 +129,19 @@ function App() {
         <h1>KiloPlan</h1>
         <p>Calculate target weights based on Rate of Perceived Exertion</p>
         <div className="toolbar">
-          <div className="segmented" role="group" aria-label="Weight unit">
-            {UNITS.map((option) => (
-              <button
-                key={option}
-                type="button"
-                aria-pressed={unit === option}
-                onClick={() => changeUnit(option)}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
+          <button
+            type="button"
+            className="unit-switch"
+            role="switch"
+            aria-checked={unit === 'lb'}
+            aria-label="Show weights in pounds"
+            data-unit={unit}
+            onClick={() => changeUnit(unit === 'kg' ? 'lb' : 'kg')}
+          >
+            <span className="unit-switch-thumb" />
+            <span className="unit-switch-label">kg</span>
+            <span className="unit-switch-label">lb</span>
+          </button>
           <button type="button" className="theme-toggle" onClick={toggleTheme}>
             {theme === 'dark' ? 'Light mode' : 'Dark mode'}
           </button>
