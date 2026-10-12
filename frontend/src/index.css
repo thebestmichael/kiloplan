@@ -12,18 +12,19 @@
   line-height: 1.5;
   color: var(--text);
   background: var(--bg);
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111317;
-    --surface: #1b1e24;
-    --text: #eef0f3;
-    --muted: #a0a7b4;
-    --border: #2f343d;
-    --accent: #e5383b;
-    --error: #ff8a8a;
-  }
+:root[data-theme='dark'] {
+  --bg: #111317;
+  --surface: #1b1e24;
+  --text: #eef0f3;
+  --muted: #a0a7b4;
+  --border: #2f343d;
+  --accent: #e5383b;
+  --error: #ff8a8a;
+
+  color-scheme: dark;
 }
 
 * {

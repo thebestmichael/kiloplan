@@ -4,6 +4,7 @@ import './App.css'
 
 type Formula = 'epley' | 'brzycki'
 type Unit = 'kg' | 'lb'
+type Theme = 'light' | 'dark'
 
 interface TargetLoadResponse {
   e1rm_kg: number
@@ -30,6 +31,14 @@ function fromKg(valueKg: number, unit: Unit): number {
   return unit === 'lb' ? valueKg / KG_PER_LB : valueKg
 }
 
+function saveTheme(theme: Theme) {
+  try {
+    localStorage.setItem('theme', theme)
+  } catch {
+    // storage unavailable: the choice just lasts for this page load
+  }
+}
+
 function errorMessage(detail: unknown): string {
   if (typeof detail === 'string') return detail
   if (Array.isArray(detail)) {
@@ -45,6 +54,10 @@ function formatWeight(valueKg: number, unit: Unit, digits: number): string {
 }
 
 function App() {
+  // index.html sets data-theme before first paint
+  const [theme, setTheme] = useState<Theme>(
+    document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light',
+  )
   const [unit, setUnit] = useState<Unit>('kg')
   const [prWeight, setPrWeight] = useState('180')
   const [prReps, setPrReps] = useState('3')
@@ -57,6 +70,13 @@ function App() {
   const [result, setResult] = useState<TargetLoadResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+
+  function toggleTheme() {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+    document.documentElement.dataset.theme = next
+    saveTheme(next)
+    setTheme(next)
+  }
 
   function changeUnit(next: Unit) {
     if (next === unit) return
@@ -108,17 +128,22 @@ function App() {
       <header>
         <h1>KiloPlan</h1>
         <p>Work out what to load for a set, from a past set of the same lift.</p>
-        <div className="unit-toggle" role="group" aria-label="Weight unit">
-          {UNITS.map((option) => (
-            <button
-              key={option}
-              type="button"
-              aria-pressed={unit === option}
-              onClick={() => changeUnit(option)}
-            >
-              {option}
-            </button>
-          ))}
+        <div className="toolbar">
+          <div className="unit-toggle" role="group" aria-label="Weight unit">
+            {UNITS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={unit === option}
+                onClick={() => changeUnit(option)}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="theme-toggle" onClick={toggleTheme}>
+            {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          </button>
         </div>
       </header>
 

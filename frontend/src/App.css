@@ -15,9 +15,24 @@ header p {
   color: var(--muted);
 }
 
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.theme-toggle {
+  padding: 6px 14px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
 .unit-toggle {
   display: inline-flex;
-  margin-bottom: 24px;
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
