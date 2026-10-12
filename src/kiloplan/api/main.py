@@ -13,6 +13,8 @@ from kiloplan.analytics.e1rm import (
     e1rm_from_rpe,
     epley,
     epley_weight,
+    hybrid,
+    hybrid_weight,
     round_to_increment,
     weight_for_rpe,
 )
@@ -20,6 +22,7 @@ from kiloplan.analytics.e1rm import (
 app = FastAPI(title="KiloPlan")
 
 FORMULAS = {
+    "hybrid": (hybrid, hybrid_weight),
     "epley": (epley, epley_weight),
     "brzycki": (brzycki, brzycki_weight),
 }
@@ -31,7 +34,7 @@ class TargetLoadRequest(BaseModel):
     pr_rpe: float = Field(ge=MIN_RPE, le=MAX_RPE)
     target_reps: int = Field(ge=1)
     target_rpe: float = Field(ge=MIN_RPE, le=MAX_RPE)
-    formula: Literal["epley", "brzycki"] = "epley"
+    formula: Literal["hybrid", "epley", "brzycki"] = "hybrid"
     increment_kg: float = Field(default=2.5, gt=0)
 
 

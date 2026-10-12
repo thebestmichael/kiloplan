@@ -20,8 +20,17 @@ def test_health():
     assert response.json() == {"status": "ok"}
 
 
-def test_target_load():
+def test_target_load_defaults_to_hybrid():
     response = client.post("/api/target-load", json=PAUSED_TRIPLE)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["e1rm_kg"] == pytest.approx(196.3636, abs=1e-4)
+    assert body["target_weight_kg"] == pytest.approx(158.1818, abs=1e-4)
+    assert body["rounded_weight_kg"] == pytest.approx(157.5)
+
+
+def test_target_load_with_epley():
+    response = client.post("/api/target-load", json={**PAUSED_TRIPLE, "formula": "epley"})
     assert response.status_code == 200
     body = response.json()
     assert body["e1rm_kg"] == pytest.approx(204.0)
