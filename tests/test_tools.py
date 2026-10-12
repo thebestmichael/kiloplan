@@ -3,40 +3,12 @@ import pytest
 from kiloplan.chatbot.tools import BELOW_CHART_NOTE, KG_PER_LB, TOOL_SCHEMAS, ProgramTools
 from kiloplan.ingestion.coach_sheet import parse_workbook
 from kiloplan.storage.program_store import store_program
-from workbooks import as_bytes, line, program_workbook
-
-# Two blocks in one tab. Block 1 ends with the 405 x 3 at RPE 9 squat from the example
-# question; block 2 has only started.
-PROGRAM = {
-    "Spring": [
-        (
-            "Week 3",
-            "3/16-22/26",
-            {"Day 1": [line("Squat", 1, 3, 395, 8), line(None, 3, 5, 355, 7)]},
-        ),
-        (
-            "Week 4",
-            "3/23-29/26",
-            {
-                "Day 1": [
-                    line("Squat", 1, 3, 405, 9),
-                    line(None, 3, 5, 365, 7.5),
-                    line("Paused Squats", 2, 3, 365, 8),
-                    line("Bench", 1, 5, 250, "<5"),
-                    line(None, 3, 5, 240, 5.5),
-                    line("Deadlifts", 1, 2, 500),
-                ],
-                "Day 3": [line("Squat", 1, 5, 370, 6.5), line(None, 1, 5, 380, 7)],
-            },
-        ),
-        ("Week 1", "3/30-4/5/26", {"Day 1": [line("Squat", 1, 2, 315, "<5")]}),
-    ]
-}
+from workbooks import EXAMPLE_PROGRAM, as_bytes, program_workbook
 
 
 @pytest.fixture
 def tools(session):
-    result = parse_workbook(as_bytes(program_workbook(PROGRAM)))
+    result = parse_workbook(as_bytes(program_workbook(EXAMPLE_PROGRAM)))
     store_program(session, "ana", "program.xlsx", result)
     session.commit()
     return ProgramTools(session, "ana")
