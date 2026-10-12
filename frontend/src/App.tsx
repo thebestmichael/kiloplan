@@ -150,7 +150,7 @@ function App() {
 
       <form onSubmit={(event) => event.preventDefault()}>
         <fieldset>
-          <legend>Your best set</legend>
+          <legend>Last Set</legend>
           <label>
             Weight ({unit})
             <input
@@ -188,7 +188,7 @@ function App() {
         </fieldset>
 
         <fieldset>
-          <legend>Target set</legend>
+          <legend>Target Set</legend>
           <label>
             Reps
             <input

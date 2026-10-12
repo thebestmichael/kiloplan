@@ -68,6 +68,7 @@ fieldset {
 }
 
 legend {
+  margin: 0 auto;
   padding: 0 6px;
   font-weight: 600;
 }
