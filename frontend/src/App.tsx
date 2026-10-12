@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 
-type Formula = 'epley' | 'brzycki'
+type Formula = 'hybrid' | 'epley' | 'brzycki'
 type Unit = 'kg' | 'lb'
 type Theme = 'light' | 'dark'
 
@@ -64,7 +64,7 @@ function App() {
   const [prRpe, setPrRpe] = useState('9')
   const [targetReps, setTargetReps] = useState('3')
   const [targetRpe, setTargetRpe] = useState('5')
-  const [formula, setFormula] = useState<Formula>('epley')
+  const [formula, setFormula] = useState<Formula>('hybrid')
   const [increment, setIncrement] = useState('2.5')
 
   const [result, setResult] = useState<TargetLoadResponse | null>(null)
@@ -228,6 +228,7 @@ function App() {
           <label>
             Formula
             <select value={formula} onChange={(event) => setFormula(event.target.value as Formula)}>
+              <option value="hybrid">Hybrid</option>
               <option value="epley">Epley</option>
               <option value="brzycki">Brzycki</option>
             </select>
