@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
+import Assistant from './Assistant.tsx'
 
 interface SheetSummary {
   name: string
@@ -176,6 +177,8 @@ function Program() {
 
       {data && (
         <>
+          <Assistant />
+
           <section className="panel">
             <h2>Summary</h2>
             <p className="panel-note">
