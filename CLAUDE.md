@@ -23,6 +23,8 @@ In use:
 - Frontend: React + TypeScript (Vite) in frontend/
 - App database: SQLite (data/kiloplan.db, gitignored). KILOPLAN_DATABASE_URL
   changes it; moving to Postgres is a connection-string change.
+  Schema changes go through Alembic migrations in src/kiloplan/storage/migrations/;
+  the API applies them on startup. Tests build tables straight from the models.
 - Assistant: local model through Ollama with tool calling, behind the ChatModel
   interface in src/kiloplan/chatbot/llm.py. No paid APIs.
 - CI: GitHub Actions on pull requests (ruff lint and format check, pytest,
@@ -94,5 +96,8 @@ hosting. The API uses a single lifter named "default" until accounts exist.
 - Assistant model: `ollama serve`, then `ollama pull qwen2.5:7b` once. Change the
   model with KILOPLAN_LLM_MODEL.
 - Live model test: `KILOPLAN_LIVE_LLM=1 uv run pytest tests/test_assistant.py`
+
+- New migration after changing models: `uv run alembic revision --autogenerate -m "what changed"`
+- Apply migrations by hand: `uv run alembic upgrade head`
 
 (fill in as they exist: dbt build)
