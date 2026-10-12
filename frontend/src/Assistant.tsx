@@ -3,8 +3,6 @@ import type { FormEvent } from 'react'
 
 interface BasisSet {
   description: string
-  tab: string
-  sheet_cell: string
 }
 
 interface Calculation {
@@ -37,27 +35,43 @@ const FLAG_LABELS: Record<string, string> = {
 const EXAMPLE =
   "I took 405 for 3 reps on squat in week 4 at RPE 9. Now I'm on week 1 of a new block and have squat for 2 reps at RPE 5. What weight should I take?"
 
+// the API accepts at most this many earlier turns
+const MAX_HISTORY_TURNS = 10
+
+interface Exchange {
+  question: string
+  response: AssistantResponse
+}
+
 function Assistant() {
   const [question, setQuestion] = useState('')
-  const [response, setResponse] = useState<AssistantResponse | null>(null)
+  const [thread, setThread] = useState<Exchange[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!question.trim()) return
+    const asked = question.trim()
+    if (!asked) return
     setLoading(true)
     setError(null)
-    setResponse(null)
+    // the server keeps no conversation, so earlier turns are sent with each question
+    const history = thread
+      .flatMap((exchange) => [
+        { role: 'user', content: exchange.question },
+        { role: 'assistant', content: exchange.response.answer },
+      ])
+      .slice(-MAX_HISTORY_TURNS)
     try {
       const result = await fetch('/api/assistant/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question: asked, history }),
       })
       const body = await result.json()
       if (result.ok) {
-        setResponse(body as AssistantResponse)
+        setThread([...thread, { question: asked, response: body as AssistantResponse }])
+        setQuestion('')
       } else {
         setError(typeof body.detail === 'string' ? body.detail : 'The assistant could not answer.')
       }
@@ -68,6 +82,11 @@ function Assistant() {
     }
   }
 
+  function startOver() {
+    setThread([])
+    setError(null)
+  }
+
   return (
     <section className="panel">
       <h2>Ask about your program</h2>
@@ -75,53 +94,62 @@ function Assistant() {
         Answers use your stored sets. Every number comes from a lookup or a calculator, not from
         the language model.
       </p>
+
+      <div aria-live="polite">
+        {thread.map(({ question: asked, response }, index) => (
+          <div key={index} className="assistant-answer">
+            <p className="asked">{asked}</p>
+            <p className="answer-text">{response.answer}</p>
+            {response.flags.length > 0 && (
+              <p className="flags">
+                {response.flags.map((flag) => (
+                  <span key={flag} className="flag">
+                    {FLAG_LABELS[flag] ?? flag}
+                  </span>
+                ))}
+              </p>
+            )}
+            {response.basis_set && (
+              <p className="basis">
+                <strong>Based on</strong> {response.basis_set.description}
+              </p>
+            )}
+            {response.calculations.length > 0 && (
+              <details>
+                <summary>How this was worked out ({response.calculations.length} steps)</summary>
+                {response.calculations.map((calculation, step) => (
+                  <pre key={step}>
+                    {calculation.tool}({JSON.stringify(calculation.arguments)}){'\n'}
+                    {JSON.stringify(calculation.result, null, 2)}
+                  </pre>
+                ))}
+              </details>
+            )}
+          </div>
+        ))}
+      </div>
+
       <form className="ask" onSubmit={handleSubmit}>
         <textarea
           rows={3}
-          placeholder={EXAMPLE}
+          placeholder={thread.length > 0 ? 'Reply or ask a follow-up' : EXAMPLE}
           value={question}
           onChange={(event) => setQuestion(event.target.value)}
         />
         <button type="submit" disabled={loading || !question.trim()}>
           {loading ? 'Thinking…' : 'Ask'}
         </button>
+        {thread.length > 0 && (
+          <button type="button" className="secondary" onClick={startOver} disabled={loading}>
+            New conversation
+          </button>
+        )}
       </form>
 
       {error && (
         <p className="error" role="alert">
           {error}
         </p>
-      )}
-
-      {response && (
-        <div className="assistant-answer" aria-live="polite">
-          <p className="answer-text">{response.answer}</p>
-          {response.flags.length > 0 && (
-            <p className="flags">
-              {response.flags.map((flag) => (
-                <span key={flag} className="flag">
-                  {FLAG_LABELS[flag] ?? flag}
-                </span>
-              ))}
-            </p>
-          )}
-          {response.basis_set && (
-            <p className="basis">
-              <strong>Based on</strong> {response.basis_set.description}
-            </p>
-          )}
-          {response.calculations.length > 0 && (
-            <details>
-              <summary>How this was worked out ({response.calculations.length} steps)</summary>
-              {response.calculations.map((calculation, index) => (
-                <pre key={index}>
-                  {calculation.tool}({JSON.stringify(calculation.arguments)}){'\n'}
-                  {JSON.stringify(calculation.result, null, 2)}
-                </pre>
-              ))}
-            </details>
-          )}
-        </div>
       )}
     </section>
   )

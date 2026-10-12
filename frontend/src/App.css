@@ -414,10 +414,23 @@ td.number {
   cursor: default;
 }
 
+.ask .secondary {
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
 .assistant-answer {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.asked {
+  margin: 0 0 8px;
+  font-weight: 600;
+  white-space: pre-line;
 }
 
 .answer-text {
