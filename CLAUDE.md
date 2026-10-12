@@ -6,6 +6,7 @@ Portfolio project aimed at data engineering roles.
 
 ## Stack
 - Python 3.12, pandas, FastAPI, pytest, ruff
+- Frontend: React + TypeScript (Vite) in frontend/
 - Warehouse: Snowflake. Transformations: dbt (SQL)
 - Orchestration: Airflow or Dagster. Storage: S3 (Parquet)
 - Infra: Terraform, Docker. CI: GitHub Actions
@@ -25,5 +26,8 @@ Portfolio project aimed at data engineering roles.
 - Run tests: `uv run pytest`
 - Lint: `uv run ruff check .`
 - Format: `uv run ruff format .`
+- Start API (port 8000): `uv run uvicorn kiloplan.api.main:app --reload`
+- Start frontend (port 5173, proxies /api to the API): `cd frontend && npm run dev`
+- Frontend lint / build: `cd frontend && npm run lint`, `npm run build`
 
-(fill in as they exist: dbt build, start API)
+(fill in as they exist: dbt build)
