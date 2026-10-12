@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 
 interface SheetSummary {
   name: string
-  lines: number
+  blocks: number
   weeks: number
+  lines: number
   first_week: string | null
   last_week: string | null
 }
@@ -16,12 +17,16 @@ interface Issue {
 }
 
 interface ProgramRow {
+  id: number
+  block_index: number
   sheet: string
   cell: string
   week_label: string
   week_start: string | null
   day_label: string
   movement: string
+  lift: string
+  variation: string
   sets: number | null
   reps_raw: string
   intensity_raw: string
@@ -34,6 +39,9 @@ interface ProgramRow {
 }
 
 interface ParseResponse {
+  filename: string
+  uploaded_at: string
+  note_count: number
   sheets: SheetSummary[]
   skipped_sheets: string[]
   issues: Issue[]
@@ -66,6 +74,23 @@ function Program() {
   const [movementFilter, setMovementFilter] = useState('')
   const [loadedOnly, setLoadedOnly] = useState(false)
 
+  // show the stored program, if there is one
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/program')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        if (!cancelled && body) {
+          setData(body as ParseResponse)
+          setFileName((body as ParseResponse).filename)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   async function upload(file: File) {
     setFileName(file.name)
     setLoading(true)
@@ -75,7 +100,7 @@ function Program() {
     try {
       const form = new FormData()
       form.append('file', file)
-      const response = await fetch('/api/program/parse', { method: 'POST', body: form })
+      const response = await fetch('/api/program/upload', { method: 'POST', body: form })
       const body = await response.json()
       if (response.ok) {
         setData(body as ParseResponse)
@@ -121,7 +146,7 @@ function Program() {
   return (
     <>
       <div className="page-intro">
-        <p>Upload your coach's spreadsheet to check what KiloPlan reads from it.</p>
+        <p>Upload your coach's spreadsheet to store your program and check what was read.</p>
       </div>
 
       <label
@@ -136,7 +161,11 @@ function Program() {
       >
         <input type="file" accept=".xlsx" onChange={handlePick} />
         <strong>{loading ? 'Reading…' : 'Choose an .xlsx file or drop it here'}</strong>
-        <span>{fileName ?? 'The file is read and shown below. Nothing is saved.'}</span>
+        <span>
+          {fileName
+            ? `${fileName} is stored. Uploading again replaces it.`
+            : 'The file is read, stored and shown below.'}
+        </span>
       </label>
 
       {error && (
@@ -150,7 +179,8 @@ function Program() {
           <section className="panel">
             <h2>Summary</h2>
             <p className="panel-note">
-              {data.rows.length} lines read from {data.sheets.length} training blocks.
+              {data.rows.length} lines and {data.note_count} notes stored from {data.sheets.length}{' '}
+              tabs.
               {data.skipped_sheets.length > 0 &&
                 ` Skipped tabs with no weeks: ${data.skipped_sheets.join(', ')}.`}
             </p>
@@ -158,7 +188,8 @@ function Program() {
               <table>
                 <thead>
                   <tr>
-                    <th>Block (tab)</th>
+                    <th>Tab</th>
+                    <th className="number">Blocks</th>
                     <th className="number">Weeks</th>
                     <th className="number">Lines</th>
                     <th>Week dates</th>
@@ -168,6 +199,7 @@ function Program() {
                   {data.sheets.map((sheet) => (
                     <tr key={sheet.name}>
                       <td>{sheet.name}</td>
+                      <td className="number">{sheet.blocks}</td>
                       <td className="number">{sheet.weeks}</td>
                       <td className="number">{sheet.lines}</td>
                       <td>{formatDates(sheet)}</td>
@@ -182,9 +214,9 @@ function Program() {
             <h2>Parsed lines</h2>
             <div className="filters">
               <label>
-                Block
+                Tab
                 <select value={sheetFilter} onChange={(event) => setSheetFilter(event.target.value)}>
-                  <option value={ALL_SHEETS}>All blocks</option>
+                  <option value={ALL_SHEETS}>All tabs</option>
                   {data.sheets.map((sheet) => (
                     <option key={sheet.name} value={sheet.name}>
                       {sheet.name}
@@ -219,11 +251,13 @@ function Program() {
               <table>
                 <thead>
                   <tr>
-                    <th>Block</th>
+                    <th>Tab</th>
+                    <th className="number">Block</th>
                     <th>Week</th>
                     <th>Week of</th>
                     <th>Day</th>
                     <th>Movement</th>
+                    <th>Lift</th>
                     <th className="number">Sets</th>
                     <th>Reps</th>
                     <th>Intensity</th>
@@ -236,12 +270,14 @@ function Program() {
                 </thead>
                 <tbody>
                   {filtered.slice(0, MAX_VISIBLE_ROWS).map((row) => (
-                    <tr key={`${row.sheet}!${row.cell}`}>
+                    <tr key={row.id}>
                       <td>{row.sheet}</td>
+                      <td className="number">{row.block_index + 1}</td>
                       <td>{row.week_label}</td>
                       <td>{row.week_start ?? ''}</td>
                       <td>{row.day_label}</td>
                       <td>{row.movement}</td>
+                      <td>{row.lift === 'other' ? '' : `${row.lift}, ${row.variation}`}</td>
                       <td className="number">{row.sets ?? ''}</td>
                       <td>{row.reps_raw}</td>
                       <td>{row.intensity_raw}</td>
@@ -272,7 +308,7 @@ function Program() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Block</th>
+                      <th>Tab</th>
                       <th>Cell</th>
                       <th>What was found</th>
                     </tr>
