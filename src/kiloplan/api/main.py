@@ -15,7 +15,6 @@ from kiloplan.analytics.e1rm import (
     epley_weight,
     hybrid,
     hybrid_weight,
-    round_to_increment,
     weight_for_rpe,
 )
 
@@ -35,13 +34,11 @@ class TargetLoadRequest(BaseModel):
     target_reps: int = Field(ge=1)
     target_rpe: float = Field(ge=MIN_RPE, le=MAX_RPE)
     formula: Literal["hybrid", "epley", "brzycki"] = "hybrid"
-    increment_kg: float = Field(default=2.5, gt=0)
 
 
 class TargetLoadResponse(BaseModel):
     e1rm_kg: float
     target_weight_kg: float
-    rounded_weight_kg: float
 
 
 @app.get("/api/health")
@@ -57,8 +54,4 @@ def target_load(request: TargetLoadRequest) -> TargetLoadResponse:
         target_weight_kg = weight_for_rpe(e1rm_kg, request.target_reps, request.target_rpe, inverse)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    return TargetLoadResponse(
-        e1rm_kg=e1rm_kg,
-        target_weight_kg=target_weight_kg,
-        rounded_weight_kg=round_to_increment(target_weight_kg, request.increment_kg),
-    )
+    return TargetLoadResponse(e1rm_kg=e1rm_kg, target_weight_kg=target_weight_kg)

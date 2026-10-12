@@ -26,7 +26,6 @@ def test_target_load_defaults_to_hybrid():
     body = response.json()
     assert body["e1rm_kg"] == pytest.approx(196.3636, abs=1e-4)
     assert body["target_weight_kg"] == pytest.approx(158.1818, abs=1e-4)
-    assert body["rounded_weight_kg"] == pytest.approx(157.5)
 
 
 def test_target_load_with_epley():
@@ -35,17 +34,13 @@ def test_target_load_with_epley():
     body = response.json()
     assert body["e1rm_kg"] == pytest.approx(204.0)
     assert body["target_weight_kg"] == pytest.approx(161.0526, abs=1e-4)
-    assert body["rounded_weight_kg"] == pytest.approx(160.0)
 
 
-def test_target_load_with_brzycki_and_increment():
-    response = client.post(
-        "/api/target-load", json={**PAUSED_TRIPLE, "formula": "brzycki", "increment_kg": 5}
-    )
+def test_target_load_with_brzycki():
+    response = client.post("/api/target-load", json={**PAUSED_TRIPLE, "formula": "brzycki"})
     assert response.status_code == 200
     body = response.json()
     assert body["target_weight_kg"] == pytest.approx(158.1818, abs=1e-4)
-    assert body["rounded_weight_kg"] == pytest.approx(160.0)
 
 
 @pytest.mark.parametrize(
@@ -56,7 +51,6 @@ def test_target_load_with_brzycki_and_increment():
         {"pr_rpe": 10.5},
         {"target_rpe": 0},
         {"formula": "lombardi"},
-        {"increment_kg": 0},
     ],
 )
 def test_target_load_rejects_invalid_input(override):
