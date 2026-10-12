@@ -21,6 +21,7 @@ from kiloplan.chatbot.llm import (
     ScriptedModel,
     ToolCall,
 )
+from kiloplan.chatbot.toolbox import Toolbox
 from kiloplan.chatbot.tools import BELOW_CHART_NOTE, ProgramTools
 from kiloplan.ingestion.coach_sheet import parse_workbook
 from kiloplan.storage.program_store import store_program
@@ -72,7 +73,7 @@ def tools(session):
 
 def ask(tools, steps, question=EXAMPLE_QUESTION):
     model = ScriptedModel(list(steps))
-    return Assistant(model, tools).ask(question), model
+    return Assistant(model, Toolbox(tools)).ask(question), model
 
 
 def test_example_question_end_to_end(tools):
@@ -320,7 +321,7 @@ def test_api_reports_when_the_model_is_not_running():
 )
 def test_example_question_with_the_real_model(tools):
     """Whatever the model does, the answer must be the right load or a question, never a guess."""
-    answer = Assistant(OllamaModel(), tools).ask(EXAMPLE_QUESTION)
+    answer = Assistant(OllamaModel(), Toolbox(tools)).ask(EXAMPLE_QUESTION)
     assert unsupported_numbers(answer.answer, EXAMPLE_QUESTION, answer.calculations) == set()
     if answer.status == "answered" and answer.basis_set:
         assert answer.basis_set["sheet_cell"] == "J5"

@@ -3,7 +3,8 @@ from datetime import date
 import pytest
 from sqlalchemy import select
 
-from kiloplan.chatbot.tools import BELOW_CHART_NOTE, KG_PER_LB, TOOL_SCHEMAS, ProgramTools
+from kiloplan.chatbot.toolbox import Toolbox
+from kiloplan.chatbot.tools import BELOW_CHART_NOTE, KG_PER_LB, ProgramTools
 from kiloplan.ingestion.coach_sheet import parse_workbook
 from kiloplan.storage.models import APP, DAY, Lifter, PerformedSet
 from kiloplan.storage.program_store import store_program
@@ -180,25 +181,24 @@ def test_set_ids_from_another_lifter_are_not_found(tools, session):
     assert other.estimate_e1rm(set_id=found["set_id"])["status"] == "no_match"
 
 
-def test_call_dispatches_by_name_and_reports_bad_input(tools):
-    ok = tools.call("latest_top_set", {"lift": "squat", "variation": None})
-    assert ok["status"] == "ok"
-    assert tools.call("delete_everything", {})["status"] == "invalid_input"
-    assert tools.call("find_sets", {"lift": "curl"})["status"] == "invalid_input"
-    assert tools.call("find_sets", {"lift": "squat", "colour": "red"})["status"] == "invalid_input"
-    assert tools.call("estimate_e1rm", {"load": 100, "reps": 3})["status"] == "invalid_input"
-    assert tools.call("estimate_e1rm", {"load": 100, "reps": 3, "rpe": 12})["status"] == (
-        "invalid_input"
-    )
-    assert tools.call("estimate_e1rm", {"load": 100, "unit": "stone", "reps": 3, "rpe": 8})[
-        "status"
-    ] == ("invalid_input")
+def test_the_toolbox_dispatches_by_name_and_reports_bad_input(tools):
+    call = Toolbox(tools).call
+    assert call("latest_top_set", {"lift": "squat", "variation": None})["status"] == "ok"
+    for name, arguments in (
+        ("delete_everything", {}),
+        ("find_sets", {"lift": "curl"}),
+        ("find_sets", {"lift": "squat", "colour": "red"}),
+        ("estimate_e1rm", {"load": 100, "reps": 3}),
+        ("estimate_e1rm", {"load": 100, "reps": 3, "rpe": 12}),
+        ("estimate_e1rm", {"load": 100, "unit": "stone", "reps": 3, "rpe": 8}),
+    ):
+        assert call(name, arguments)["status"] == "invalid_input"
 
 
-def test_every_schema_names_a_real_tool(tools):
-    for schema in TOOL_SCHEMAS:
-        assert callable(getattr(tools, schema["name"]))
-        assert schema["parameters"]["type"] == "object"
+def test_every_tool_is_one_of_the_groups_own_methods(tools):
+    for tool in tools.tools():
+        assert tool.handler == getattr(tools, tool.name)
+        assert set(tool.parameters["required"]) <= set(tool.parameters["properties"])
 
 
 def log_in_app(session, lifter, performed_on, load_kg, reps, rpe):
