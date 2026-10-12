@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import Calculator from './Calculator.tsx'
+import Program from './Program.tsx'
 
 type Theme = 'light' | 'dark'
 type Page = 'calculator' | 'program' | 'nutrition'
@@ -61,15 +62,9 @@ function App() {
         </button>
       </header>
 
-      <main>
+      <main className={page === 'program' ? 'wide' : undefined}>
         {page === 'calculator' && <Calculator />}
-        {page === 'program' && (
-          <section className="placeholder">
-            <h2>Program</h2>
-            <p>Upload your coach's spreadsheet and see your training history here.</p>
-            <p className="soon">Coming soon</p>
-          </section>
-        )}
+        {page === 'program' && <Program />}
         {page === 'nutrition' && (
           <section className="placeholder">
             <h2>Nutrition</h2>
