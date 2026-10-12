@@ -23,7 +23,7 @@ from kiloplan.analytics.e1rm import (
     hybrid_weight,
     weight_for_rpe,
 )
-from kiloplan.chatbot.assistant import Assistant
+from kiloplan.chatbot.assistant import Assistant, Turn
 from kiloplan.chatbot.llm import ChatModel, ModelUnavailableError, OllamaModel
 from kiloplan.chatbot.toolbox import Toolbox
 from kiloplan.chatbot.tools import ProgramTools
@@ -220,9 +220,20 @@ def get_chat_model() -> ChatModel:
     return OllamaModel()
 
 
+MAX_HISTORY_TURNS = 10
+
+
+class HistoryTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
 class AskRequest(BaseModel):
+    """`history` is the conversation so far, oldest first. The server keeps none of it."""
+
     question: str = Field(min_length=1, max_length=2000)
     lifter: str = DEFAULT_LIFTER
+    history: list[HistoryTurn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
 
 
 class CalculationOut(BaseModel):
@@ -248,7 +259,8 @@ def ask_assistant(
     """Answer a question about the lifter's stored program. Numbers come only from tools."""
     assistant = Assistant(model, Toolbox(ProgramTools(session, request.lifter)))
     try:
-        answer = assistant.ask(request.question)
+        history = [Turn(turn.role, turn.content) for turn in request.history]
+        answer = assistant.ask(request.question, history)
     except ModelUnavailableError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     return AssistantResponse(
