@@ -239,3 +239,6 @@ crash.log
 
 # Personal sample data, not for the public repo
 samplespreadsheet/
+
+# Local application database
+data/
