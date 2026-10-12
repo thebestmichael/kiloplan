@@ -6,6 +6,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.20.0",
     "fastapi>=0.143.0",
     "ollama>=0.6.3",
     "openpyxl>=3.1.5",
