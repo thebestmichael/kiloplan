@@ -45,8 +45,8 @@ def create_db_engine(url: str) -> Engine:
     return engine
 
 
-def migrate(url: str) -> None:
-    """Bring a database to the newest schema.
+def migrate(url: str, revision: str = "head") -> None:
+    """Bring a database up to a schema revision, the newest by default.
 
     A database made before migrations existed has the baseline tables but no version
     mark, so it is marked as the baseline first.
@@ -59,7 +59,7 @@ def migrate(url: str) -> None:
     engine.dispose()
     if "lifters" in tables and "alembic_version" not in tables:
         command.stamp(config, BASELINE_REVISION)
-    command.upgrade(config, "head")
+    command.upgrade(config, revision)
 
 
 @cache

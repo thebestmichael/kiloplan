@@ -1,18 +1,24 @@
-"""Stores a parsed coach spreadsheet as blocks, weeks and rows for one lifter."""
+"""Stores a parsed coach spreadsheet as blocks, weeks and rows for one lifter.
+
+Each row with an actual load is also written to the lifter's performed sets.
+"""
 
 import re
 from collections import defaultdict
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from kiloplan.ingestion.coach_sheet import ParseResult, SheetWeek
 from kiloplan.ingestion.lifts import classify
 from kiloplan.storage.models import (
+    COACH_SHEET,
+    WEEK,
     Block,
     Lifter,
     Note,
+    PerformedSet,
     ProgramIssue,
     ProgramRow,
     Upload,
@@ -59,8 +65,17 @@ def get_or_create_lifter(session: Session, name: str) -> Lifter:
 
 
 def store_program(session: Session, lifter_name: str, filename: str, result: ParseResult) -> Upload:
-    """Replace the lifter's stored program with this parse result."""
+    """Replace the lifter's stored program with this parse result.
+
+    Performed sets that came from the previous sheet are replaced too. Sets logged in
+    the app are kept.
+    """
     lifter = get_or_create_lifter(session, lifter_name)
+    session.execute(
+        delete(PerformedSet).where(
+            PerformedSet.lifter_id == lifter.id, PerformedSet.source == COACH_SHEET
+        )
+    )
     for previous in list(lifter.uploads):
         session.delete(previous)
     session.flush()
@@ -129,7 +144,26 @@ def store_program(session: Session, lifter_name: str, filename: str, result: Par
             target_load_raw=parsed.target_load_raw,
             sheet_cell=parsed.cell,
         )
-        stored_weeks[key].rows.append(row)
+        week = stored_weeks[key]
+        week.rows.append(row)
+        if row.load_kg is not None:
+            session.add(
+                PerformedSet(
+                    lifter=lifter,
+                    program_row=row,
+                    source=COACH_SHEET,
+                    performed_on=week.start_date,
+                    date_precision=WEEK,
+                    movement_raw=row.movement_raw,
+                    lift=row.lift,
+                    variation=row.variation,
+                    sets=row.sets,
+                    reps=row.reps,
+                    load_kg=row.load_kg,
+                    rpe=row.rpe,
+                    rpe_below_5=row.rpe_below_5,
+                )
+            )
         row_counts[key] += 1
         rows_by_cell[parsed.sheet, parsed.cell] = row
 

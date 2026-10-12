@@ -1,4 +1,4 @@
-"""Tables for uploaded programs. All loads are in kg."""
+"""Tables for uploaded programs and the sets a lifter performed. All loads are in kg."""
 
 from datetime import UTC, date, datetime
 
@@ -8,6 +8,14 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
     pass
+
+
+# where a performed set came from
+COACH_SHEET = "coach_sheet"
+APP = "app"
+# how exactly `performed_on` is known: the coach sheet only dates its weeks
+DAY = "day"
+WEEK = "week"
 
 
 class Lifter(Base):
@@ -134,3 +142,34 @@ class ProgramIssue(Base):
 
     upload: Mapped[Upload] = relationship(back_populates="issues")
     row: Mapped[ProgramRow | None] = relationship(back_populates="issues")
+
+
+class PerformedSet(Base):
+    """What a lifter actually lifted: `sets` x `reps` at `load_kg`, RPE of the last set.
+
+    Program rows hold the prescription; this is the log the assistant reads. Sets
+    imported from a coach sheet keep a link to their program row and take the week's
+    start date. Sets logged in the app have their own date and no program row.
+    """
+
+    __tablename__ = "performed_sets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lifter_id: Mapped[int] = mapped_column(ForeignKey("lifters.id", ondelete="CASCADE"), index=True)
+    program_row_id: Mapped[int | None] = mapped_column(
+        ForeignKey("program_rows.id", ondelete="SET NULL")
+    )
+    source: Mapped[str]
+    performed_on: Mapped[date | None]
+    date_precision: Mapped[str]
+    movement_raw: Mapped[str]
+    lift: Mapped[str] = mapped_column(index=True)
+    variation: Mapped[str]
+    sets: Mapped[int | None]
+    reps: Mapped[int | None]
+    load_kg: Mapped[float]
+    rpe: Mapped[float | None]
+    rpe_below_5: Mapped[bool] = mapped_column(default=False)
+
+    lifter: Mapped[Lifter] = relationship()
+    program_row: Mapped[ProgramRow | None] = relationship()
