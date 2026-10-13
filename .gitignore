@@ -242,3 +242,4 @@ samplespreadsheet/
 
 # Local application database
 data/
+dbt/.user.yml

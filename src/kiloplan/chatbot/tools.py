@@ -7,6 +7,7 @@ display.
 
 import inspect
 from collections.abc import Callable
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -20,14 +21,17 @@ from kiloplan.analytics.e1rm import (
     weight_for_rpe,
 )
 from kiloplan.ingestion.lifts import COMPETITION
-from kiloplan.storage.models import Block, ProgramRow, Upload, Week
+from kiloplan.storage.models import Block, Lifter, NutritionGoal, ProgramRow, Upload, Week
 from kiloplan.storage.program_store import latest_upload
+from kiloplan.storage.warehouse import Warehouse
 
 KG_PER_LB = 0.45359237
 MAIN_LIFTS = ("squat", "bench", "deadlift")
 # a stated load matches a logged one within this share of the logged load
 LOAD_TOLERANCE = 0.01
 MAX_LISTED_SETS = 8
+MAX_REPORT_WEEKS = 12
+MAX_REPORT_DAYS = 31
 
 BELOW_CHART_NOTE = (
     f"RPE below {CHART_MIN_RPE:g} is under the usual RPE chart range, so this number is an "
@@ -94,9 +98,10 @@ def describe_set(row: ProgramRow) -> Result:
 class ProgramTools:
     """The tools, bound to one lifter's stored program."""
 
-    def __init__(self, session: Session, lifter: str) -> None:
+    def __init__(self, session: Session, lifter: str, warehouse: Warehouse | None = None) -> None:
         self.session = session
         self.lifter = lifter
+        self.warehouse = warehouse
 
     def _upload(self) -> Upload | None:
         return latest_upload(self.session, self.lifter)
@@ -410,6 +415,128 @@ class ProgramTools:
         result["below_chart_range"] = estimate["below_chart_range"] or below_chart_range(target_rpe)
         return self._finish(result)
 
+    def _report_source(self) -> tuple[Warehouse, int] | Result:
+        """The summary tables and this lifter's id in them, or why they cannot be read."""
+        if self.warehouse is None or not self.warehouse.available:
+            return {
+                "status": "no_warehouse",
+                "kind": "report",
+                "message": (
+                    "The training and nutrition summary tables have not been built yet. "
+                    "Run the pipeline (uv run python -m kiloplan.pipeline) and ask again."
+                ),
+            }
+        lifter = self.session.scalar(select(Lifter).where(Lifter.name == self.lifter))
+        if lifter is None:
+            message = "Nothing has been logged yet."
+            return {"status": "no_match", "kind": "report", "message": message}
+        return self.warehouse, lifter.id
+
+    def _as_of(self) -> str:
+        built = self.warehouse.built_at if self.warehouse else None
+        return built.strftime("%Y-%m-%d %H:%M UTC") if built else "unknown"
+
+    def weekly_volume(self, lift: str, weeks: int = 4) -> Result:
+        """Training volume (sets, reps and tonnage) for a lift over its most recent weeks."""
+        if lift not in MAIN_LIFTS:
+            message = f"lift must be one of {', '.join(MAIN_LIFTS)}"
+            return {"status": "invalid_input", "message": message}
+        source = self._report_source()
+        if isinstance(source, dict):
+            return source
+        warehouse, lifter_id = source
+        rows = warehouse.weekly_volume(lifter_id, lift, max(1, min(weeks, MAX_REPORT_WEEKS)))
+        if not rows:
+            message = f"No {lift} training is in the summary tables, last built {self._as_of()}."
+            return {"status": "no_match", "kind": "report", "message": message}
+        listed = [
+            {
+                "block": row["block_index"] + 1,
+                "week": row["week_number"],
+                "week_of": row["week_start"].isoformat() if row["week_start"] else None,
+                "total_sets": int(row["total_sets"]),
+                "total_reps": int(row["total_reps"]),
+                **_loads("volume", row["volume_kg"]),
+                **_loads("top_load", row["top_load_kg"]),
+            }
+            for row in rows
+        ]
+        lines = [
+            f"block {week['block']} week {week['week']}: {week['total_sets']} sets, "
+            f"{week['total_reps']} total reps, "
+            f"{week['volume_lb']:.1f} lb ({week['volume_kg']:.1f} kg) of volume"
+            for week in listed
+        ]
+        # added up here so the model never has to
+        total = {
+            "weeks": len(listed),
+            "total_sets": sum(week["total_sets"] for week in listed),
+            "total_reps": sum(week["total_reps"] for week in listed),
+            **_loads("volume", sum(row["volume_kg"] for row in rows)),
+        }
+        text = f"{lift.capitalize()} volume, newest week first: " + "; ".join(lines) + "."
+        if len(listed) > 1:
+            text += (
+                f" Total over these {total['weeks']} weeks: {total['volume_lb']:.1f} lb "
+                f"({total['volume_kg']:.1f} kg)."
+            )
+        return {
+            "status": "ok",
+            "lift": lift,
+            "weeks": listed,
+            "total_over_these_weeks": total,
+            "text": text,
+            "as_of": self._as_of(),
+        }
+
+    def daily_macros(self, days: int = 1) -> Result:
+        """Calories and macros logged over the last `days` days, ending today, with the goal."""
+        source = self._report_source()
+        if isinstance(source, dict):
+            return source
+        warehouse, lifter_id = source
+        days = max(1, min(days, MAX_REPORT_DAYS))
+        today = date.today()
+        rows = warehouse.daily_macros(lifter_id, today - timedelta(days=days - 1), today)
+        if not rows:
+            return {
+                "status": "no_match",
+                "kind": "report",
+                "message": (
+                    f"No food is in the summary tables for the last {days} day(s). They were "
+                    f"last built {self._as_of()}; food logged since then is not in them yet."
+                ),
+            }
+        keys = ("kcal", "protein_g", "carbs_g", "fat_g")
+        listed = [
+            {"date": row["diary_date"].isoformat(), **{key: round(row[key], 1) for key in keys}}
+            for row in rows
+        ]
+        average = {key: round(sum(row[key] for row in rows) / len(rows), 1) for key in keys}
+        goal = self.session.get(NutritionGoal, lifter_id)
+        result: Result = {
+            "status": "ok",
+            "days_requested": days,
+            "days_with_food_logged": len(listed),
+            "days": listed,
+            "average_per_logged_day": average,
+            "as_of": self._as_of(),
+        }
+        lines = [
+            f"{day['date']}: {day['kcal']:.0f} kcal, {day['protein_g']:.0f} g protein, "
+            f"{day['carbs_g']:.0f} g carbs, {day['fat_g']:.0f} g fat"
+            for day in listed
+        ]
+        result["text"] = "Food logged, newest day first: " + "; ".join(lines) + "."
+        if days > 1 and len(listed) < days:
+            result["note"] = (
+                f"Only {len(listed)} of the last {days} days have food logged, so the average "
+                "covers those days only."
+            )
+        if goal is not None:
+            result["daily_goal"] = {key: round(getattr(goal, key), 1) for key in keys}
+        return result
+
     def call(self, name: str, arguments: dict[str, Any]) -> Result:
         """Run a tool by name. Bad names and arguments come back as results, not exceptions."""
         tools: dict[str, Callable[..., Result]] = {
@@ -417,6 +544,8 @@ class ProgramTools:
             "latest_top_set": self.latest_top_set,
             "estimate_e1rm": self.estimate_e1rm,
             "target_load": self.target_load,
+            "weekly_volume": self.weekly_volume,
+            "daily_macros": self.daily_macros,
         }
         if name not in tools:
             message = f"There is no tool {name!r}. Tools: {', '.join(tools)}."
@@ -520,6 +649,35 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 **_BASIS,
             },
             "required": ["target_reps", "target_rpe"],
+        },
+    },
+    {
+        "name": "weekly_volume",
+        "description": (
+            "Training volume for a lift over its most recent weeks: sets, reps and tonnage "
+            "per week. Use for questions about volume or how much work was done."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "lift": _LIFT,
+                "weeks": {"type": "integer", "description": "How many recent weeks. Default 4."},
+            },
+            "required": ["lift"],
+        },
+    },
+    {
+        "name": "daily_macros",
+        "description": (
+            "Calories, protein, carbs and fat the lifter logged over the last days, ending "
+            "today, with their daily goal and the average. Use for any food or macro question."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "How many days back. 1 means today."}
+            },
+            "required": [],
         },
     },
 ]

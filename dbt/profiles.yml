@@ -1,0 +1,9 @@
+# Run dbt from the repo root: uv run dbt build --project-dir dbt --profiles-dir dbt
+# No secrets live here. The dev target is a local DuckDB file.
+kiloplan:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('KILOPLAN_WAREHOUSE_PATH', 'data/warehouse.duckdb') }}"
+      threads: 4

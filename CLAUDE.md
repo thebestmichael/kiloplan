@@ -12,15 +12,23 @@ Portfolio project aimed at data engineering roles.
 - Food data: USDA FoodData Central SR Legacy, loaded into the app database
 - Assistant: local model through Ollama with tool calling, behind the ChatModel
   interface in src/kiloplan/chatbot/llm.py
-- Warehouse: Snowflake. Transformations: dbt (SQL)
-- Orchestration: Airflow or Dagster. Storage: S3 (Parquet)
-- Infra: Terraform, Docker. CI: GitHub Actions
+- Pipeline: app database -> Parquet (data/lake/raw) -> dbt models in a local
+  DuckDB warehouse (data/warehouse.duckdb). All of data/ is gitignored.
+- Planned, not built: S3 for the Parquet files and a Snowflake dbt target.
+- CI: GitHub Actions
 
 ## Conventions
 - Store all weights in kg. Convert only at the display layer.
 - Type hints on all calculation code. Tests for every formula.
 - SQL transformations go in dbt. Python handles API calls, progression
   logic, and the chatbot.
+- The dbt project in dbt/ reads the raw Parquet files as sources and must stay
+  portable SQL, so the same models can run on Snowflake. Formulas that exist in
+  both Python and SQL (e1RM, volume) are checked against each other in
+  tests/test_pipeline.py.
+- The assistant's volume and macro tools read the dbt tables, so they are only as
+  fresh as the last pipeline run, and every such answer says when that was.
+  Account tables (users, sessions) are never exported.
 - Never commit secrets. Credentials live in .env (gitignored).
 - Small commits, one purpose each. Conventional prefixes: feat, fix, test, docs.
 - Uploaded programs are stored as structured rows (lifter, block, week, day,
@@ -53,7 +61,7 @@ Portfolio project aimed at data engineering roles.
 - Start frontend (port 5173, proxies /api to the API): `cd frontend && npm run dev`
 - Frontend lint / build: `cd frontend && npm run lint`, `npm run build`
 - Load USDA foods (once, downloads about 6 MB): `uv run python -m kiloplan.ingestion.usda`
+- Run the pipeline (export to Parquet, then dbt build): `uv run python -m kiloplan.pipeline`
+- dbt alone: `uv run dbt build --project-dir dbt --profiles-dir dbt`
 - Assistant model: `ollama serve`, then `ollama pull qwen2.5:7b` once. Change the
   model with KILOPLAN_LLM_MODEL. Tests use ScriptedModel and need no model running.
-
-(fill in as they exist: dbt build)

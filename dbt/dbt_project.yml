@@ -1,0 +1,16 @@
+name: kiloplan
+version: "1.0.0"
+profile: kiloplan
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: target
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  kiloplan:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table
