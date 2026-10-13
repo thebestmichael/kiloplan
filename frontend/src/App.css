@@ -73,28 +73,6 @@ main.wide {
   margin-bottom: 24px;
 }
 
-.placeholder {
-  text-align: center;
-}
-
-.placeholder h2 {
-  margin: 0 0 8px;
-}
-
-.placeholder p {
-  margin: 0;
-  color: var(--muted);
-}
-
-.placeholder .soon {
-  display: inline-block;
-  margin-top: 16px;
-  padding: 4px 12px;
-  font-size: 0.875rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-}
-
 .unit-switch {
   position: relative;
   display: inline-grid;
@@ -571,4 +549,175 @@ td.number {
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 12px;
   margin-top: 12px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.day-nav {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+
+.day-nav input {
+  width: auto;
+}
+
+.macro-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.macro-value {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.macro-value small {
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.bar {
+  height: 8px;
+  margin-top: 6px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  background: #15803d;
+}
+
+.bar[data-over='true'] span {
+  background: var(--accent);
+}
+
+.macro .panel-note {
+  margin: 4px 0 0;
+}
+
+.meal-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.entries {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.entries li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.entries span,
+.entries small,
+.food-results span,
+.food-results small {
+  display: block;
+}
+
+.entries small,
+.food-results small {
+  color: var(--muted);
+}
+
+.meal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.meal-actions select,
+.inline-form select {
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.add-food {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.add-food > button {
+  justify-self: start;
+}
+
+.food-results {
+  max-height: 280px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.food-results button {
+  width: 100%;
+  padding: 8px 10px;
+  font-weight: 400;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.food-results button:hover {
+  background: var(--bg);
+}
+
+.food-results li.muted {
+  padding: 8px 10px;
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  align-items: end;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.inline-form .wide-field {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.inline-form button {
+  padding: 8px 12px;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
