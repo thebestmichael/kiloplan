@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { convertInput, isNumber, useUnitChange } from '../units.ts'
 import type { Unit } from '../units.ts'
 import { useCalculation } from '../useCalculation.ts'
+import Barbell from './Barbell.tsx'
+import { plateShape } from './plateShapes.ts'
 
 interface PlateStock {
   weight: number
@@ -30,22 +32,6 @@ const DEFAULT_STOCK: Record<Unit, PlateStock[]> = {
 const DEFAULT_BAR: Record<Unit, string> = { kg: '20', lb: '45' }
 const STORAGE_KEY = 'plate-stock'
 
-// competition colours for kg plates; lb plates get the same colour as their nearest kg plate
-const COLOURS: [number, string][] = [
-  [25, '#c8102e'],
-  [20, '#1d4ed8'],
-  [15, '#eab308'],
-  [10, '#15803d'],
-  [5, '#e5e7eb'],
-  [2.5, '#111827'],
-  [0, '#9ca3af'],
-]
-
-function plateColour(weight: number, unit: Unit): string {
-  const kg = unit === 'lb' ? weight / 2.2 : weight
-  return COLOURS.find(([threshold]) => kg >= threshold - 0.01)![1]
-}
-
 function loadStock(): Record<Unit, PlateStock[]> {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null')
@@ -64,30 +50,6 @@ function loadStock(): Record<Unit, PlateStock[]> {
     // unreadable or blocked storage: fall back to the defaults
   }
   return DEFAULT_STOCK
-}
-
-function Barbell({ perSide, unit }: { perSide: number[]; unit: Unit }) {
-  const heaviest = unit === 'lb' ? 55 : 25
-  return (
-    <div className="barbell" role="img" aria-label={`One side: ${perSide.join(', ') || 'empty'}`}>
-      <span className="barbell-shaft" />
-      <span className="barbell-collar" />
-      {perSide.map((weight, index) => (
-        <span
-          key={index}
-          className="plate"
-          style={{
-            height: `${Math.max(34, Math.min(100, (weight / heaviest) * 100))}%`,
-            background: plateColour(weight, unit),
-          }}
-          title={`${weight} ${unit}`}
-        >
-          {weight}
-        </span>
-      ))}
-      <span className="barbell-end" />
-    </div>
-  )
 }
 
 function Plates({ unit }: { unit: Unit }) {
@@ -189,7 +151,7 @@ function Plates({ unit }: { unit: Unit }) {
               <button
                 key={plate.weight}
                 type="button"
-                style={{ borderColor: plateColour(plate.weight, unit) }}
+                style={{ borderColor: plateShape(plate.weight, unit).colour }}
                 onClick={() => setOnBar([...onBar, plate.weight])}
               >
                 {plate.weight}
@@ -236,31 +198,11 @@ function Plates({ unit }: { unit: Unit }) {
 
       {mode === 'reverse' && reverse.result && (
         <section className="result" aria-live="polite">
-          <div
-            onClick={(event) => {
-              const index = (event.target as HTMLElement).dataset.index
-              if (index !== undefined) setOnBar(sorted.filter((_, i) => i !== Number(index)))
-            }}
-          >
-            <div className="barbell" role="img" aria-label={`One side: ${sorted.join(', ') || 'empty'}`}>
-              <span className="barbell-shaft" />
-              <span className="barbell-collar" />
-              {sorted.map((weight, index) => (
-                <span
-                  key={index}
-                  data-index={index}
-                  className="plate removable"
-                  style={{
-                    height: `${Math.max(34, Math.min(100, (weight / (unit === 'lb' ? 55 : 25)) * 100))}%`,
-                    background: plateColour(weight, unit),
-                  }}
-                >
-                  {weight}
-                </span>
-              ))}
-              <span className="barbell-end" />
-            </div>
-          </div>
+          <Barbell
+            perSide={sorted}
+            unit={unit}
+            onRemove={(index) => setOnBar(sorted.filter((_, i) => i !== index))}
+          />
           <p className="result-label">Total</p>
           <p className="result-value">
             {reverse.result.total} {unit}
