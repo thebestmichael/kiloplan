@@ -188,6 +188,32 @@ def points(request: PointsRequest) -> PointsResponse:
     )
 
 
+class PointsTargetRequest(BaseModel):
+    formula: Literal["dots", "ipf_gl", "wilks", "wilks_2020"]
+    sex: Literal["male", "female"]
+    bodyweight_kg: float = Field(gt=0, le=400)
+    target_points: float = Field(ge=0, le=2000)
+    equipped: bool = False
+    bench_only: bool = False
+
+
+@app.post("/api/points/target")
+def points_target(request: PointsTargetRequest) -> dict[str, float]:
+    """The total needed to reach a points score at a bodyweight."""
+    try:
+        total_kg = scoring.total_for_points(
+            request.formula,
+            request.sex,
+            request.bodyweight_kg,
+            request.target_points,
+            request.equipped,
+            request.bench_only,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {"total_kg": total_kg}
+
+
 class AttemptsRequest(BaseModel):
     """Goal third attempts in kg. Leave a lift out to skip it."""
 

@@ -8,6 +8,7 @@ from math import exp
 from typing import Literal
 
 Sex = Literal["male", "female"]
+Formula = Literal["dots", "ipf_gl", "wilks", "wilks_2020"]
 
 MIN_GL_BODYWEIGHT_KG = 35.0
 
@@ -109,6 +110,16 @@ def dots(sex: Sex, bodyweight_kg: float, total_kg: float) -> float:
     return total_kg * dots_coefficient(sex, bodyweight_kg)
 
 
+def ipf_gl_coefficient(
+    sex: Sex, bodyweight_kg: float, equipped: bool = False, bench_only: bool = False
+) -> float:
+    """Points per kg of total. Zero below 35 kg bodyweight, where the formula is undefined."""
+    if bodyweight_kg < MIN_GL_BODYWEIGHT_KG:
+        return 0.0
+    a, b, c = IPF_GL[sex, equipped, bench_only]
+    return max(0.0, 100 / (a - b * exp(-c * bodyweight_kg)))
+
+
 def ipf_gl(
     sex: Sex,
     bodyweight_kg: float,
@@ -116,9 +127,27 @@ def ipf_gl(
     equipped: bool = False,
     bench_only: bool = False,
 ) -> float:
-    """IPF GL (Goodlift) points. Zero below 35 kg bodyweight, where the formula is undefined."""
+    """IPF GL (Goodlift) points."""
     _validate(bodyweight_kg, total_kg)
-    if bodyweight_kg < MIN_GL_BODYWEIGHT_KG:
-        return 0.0
-    a, b, c = IPF_GL[sex, equipped, bench_only]
-    return total_kg * max(0.0, 100 / (a - b * exp(-c * bodyweight_kg)))
+    return total_kg * ipf_gl_coefficient(sex, bodyweight_kg, equipped, bench_only)
+
+
+def total_for_points(
+    formula: Formula,
+    sex: Sex,
+    bodyweight_kg: float,
+    points: float,
+    equipped: bool = False,
+    bench_only: bool = False,
+) -> float:
+    """The total needed to score `points` at this bodyweight: points / coefficient."""
+    _validate(bodyweight_kg, points)
+    coefficient = {
+        "dots": lambda: dots_coefficient(sex, bodyweight_kg),
+        "wilks": lambda: wilks_coefficient(sex, bodyweight_kg),
+        "wilks_2020": lambda: wilks_2020_coefficient(sex, bodyweight_kg),
+        "ipf_gl": lambda: ipf_gl_coefficient(sex, bodyweight_kg, equipped, bench_only),
+    }[formula]()
+    if coefficient <= 0:
+        raise ValueError(f"{formula} is not defined at a bodyweight of {bodyweight_kg:g} kg")
+    return points / coefficient

@@ -196,3 +196,18 @@ def test_attempts():
         "attempts_kg": {"squat": [182.5, 192.5, 200.0], "deadlift": [242.5, 257.5, 267.5]},
         "total_kg": 467.5,
     }
+
+
+def test_points_target():
+    request = {"formula": "wilks", "sex": "male", "bodyweight_kg": 100, "target_points": 500}
+    body = client.post("/api/points/target", json=request).json()
+    assert body == {"total_kg": pytest.approx(821.57, abs=0.01)}
+
+    too_light = {**request, "formula": "ipf_gl", "bodyweight_kg": 30}
+    response = client.post("/api/points/target", json=too_light)
+    assert response.status_code == 422
+    assert "not defined" in response.json()["detail"]
+    assert (
+        client.post("/api/points/target", json={**request, "formula": "sinclair"}).status_code
+        == 422
+    )
