@@ -1,122 +1,9 @@
-import zipfile
-
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
 
-from kiloplan.analytics.nutrition import (
-    Macros,
-    for_grams,
-    kcal_from_macros,
-    recommended_water_ml,
-    remaining,
-    total,
-)
 from kiloplan.api.main import app
-from kiloplan.ingestion.usda import load_foods, read_foods
-from kiloplan.storage.models import Food
 
 client = TestClient(app)
-
-FOOD_CSV = """fdc_id,data_type,description,food_category_id,publication_date
-1,sr_legacy_food,"Chicken, breast, cooked",5,2019-04-01
-2,sr_legacy_food,"Rice, white, cooked",20,2019-04-01
-3,sr_legacy_food,Mystery powder,99,2019-04-01
-"""
-NUTRIENT_CSV = """id,fdc_id,nutrient_id,amount
-1,1,1008,165
-2,1,1003,31
-3,1,1004,3.6
-4,1,1005,0
-5,2,1008,130
-6,2,1003,2.7
-7,2,1004,0.3
-8,2,1005,28.2
-9,2,1079,0.4
-10,2,1093,1
-11,3,1003,80
-12,3,1005,5
-13,3,1004,4
-"""
-PORTION_CSV = """id,fdc_id,seq_num,amount,measure_unit_id,portion_description,modifier,gram_weight
-1,2,2,1,9999,,"cup, packed",186
-2,2,1,1,9999,,cup,158
-3,1,1,1,9999,,breast,0
-"""
-CATEGORY_CSV = """id,code,description
-5,0500,Poultry Products
-20,2000,Cereal Grains and Pasta
-"""
-
-
-@pytest.fixture
-def usda_zip(tmp_path):
-    path = tmp_path / "foods.zip"
-    with zipfile.ZipFile(path, "w") as archive:
-        for name, content in (
-            ("food.csv", FOOD_CSV),
-            ("food_nutrient.csv", NUTRIENT_CSV),
-            ("food_portion.csv", PORTION_CSV),
-            ("food_category.csv", CATEGORY_CSV),
-        ):
-            archive.writestr(f"dataset/{name}", content)
-    return path
-
-
-@pytest.fixture
-def foods(usda_zip, session):
-    load_foods(session, read_foods(usda_zip))
-    session.commit()
-    return {food.name: food.id for food in session.scalars(select(Food))}
-
-
-def test_for_grams_scales_per_100g_values():
-    chicken = Macros(kcal=165, protein_g=31, carbs_g=0, fat_g=3.6)
-    assert for_grams(chicken, 150) == Macros(247.5, 46.5, 0, pytest.approx(5.4))
-    assert for_grams(chicken, 0) == Macros()
-    with pytest.raises(ValueError):
-        for_grams(chicken, -1)
-
-
-def test_total_and_remaining():
-    eaten = total([Macros(500, 40, 50, 15), Macros(300, 10, 45, 8)])
-    assert eaten == Macros(800, 50, 95, 23)
-    assert total([]) == Macros()
-    # going past a goal leaves a negative amount
-    assert remaining(Macros(2500, 180, 300, 70), eaten) == Macros(1700, 130, 205, 47)
-    assert remaining(Macros(700, 60, 80, 20), eaten) == Macros(-100, 10, -15, -3)
-
-
-def test_kcal_from_macros_uses_4_4_9():
-    assert kcal_from_macros(protein_g=30, carbs_g=50, fat_g=10) == 410
-
-
-def test_read_foods(usda_zip):
-    chicken, rice, powder = read_foods(usda_zip)
-    assert (chicken.fdc_id, chicken.name, chicken.category) == (
-        1,
-        "Chicken, breast, cooked",
-        "Poultry Products",
-    )
-    assert chicken.kcal == 165
-    # a portion with no gram weight is dropped
-    assert chicken.portions == []
-    # portions come back in the dataset's order, and other nutrients are ignored
-    assert rice.portions == [("1 cup", 158.0), ("1 cup, packed", 186.0)]
-    assert rice.nutrients == {1008: 130.0, 1003: 2.7, 1004: 0.3, 1005: 28.2, 1079: 0.4}
-    # no energy value: 4 * 80 + 4 * 5 + 9 * 4
-    assert (powder.category, powder.kcal) == ("", 376)
-
-
-def test_load_foods_updates_rather_than_duplicates(usda_zip, session):
-    records = read_foods(usda_zip)
-    assert load_foods(session, records) == 3
-    records[1].nutrients[1008] = 131
-    load_foods(session, records)
-    session.commit()
-    assert session.scalar(select(func.count()).select_from(Food)) == 3
-    rice = session.scalar(select(Food).where(Food.fdc_id == 2))
-    assert (rice.kcal, rice.fiber_g, len(rice.portions)) == (131, 0.4, 2)
 
 
 def test_food_search_matches_every_word(foods):
@@ -256,13 +143,6 @@ def test_water_has_no_upper_limit():
     request = {"day": "2026-10-13", "ml": 4500}
     assert client.post("/api/nutrition/water", json=request).json() == {"water_ml": 4500}
     assert client.post("/api/nutrition/water", json=request).json() == {"water_ml": 9000}
-
-
-def test_recommended_water_is_35_ml_per_kg():
-    assert recommended_water_ml(80) == 2800
-    assert recommended_water_ml(100.5) == pytest.approx(3517.5)
-    with pytest.raises(ValueError):
-        recommended_water_ml(0)
 
 
 def test_recommended_water_appears_once_bodyweight_is_set(ben):

@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from conftest import sign_up
+from accounts import sign_up
 from kiloplan.api.deps import SESSION_COOKIE
 from kiloplan.api.main import app
 from kiloplan.storage import auth_store
