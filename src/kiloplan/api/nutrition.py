@@ -112,6 +112,8 @@ class DayOut(BaseModel):
     totals: SignedMacros
     goal: SignedMacros | None
     remaining: SignedMacros | None
+    water_ml: float
+    water_goal_ml: float
 
 
 def _entry_out(entry: DiaryEntry) -> EntryOut:
@@ -132,6 +134,7 @@ def get_day(session: DbSession, day: date, lifter: str = DEFAULT_LIFTER) -> DayO
     owner = get_or_create_lifter(session, lifter)
     entries = store.entries_for_day(session, owner, day)
     goal = store.get_goal(session, owner)
+    water_ml = store.water_for_day(session, owner, day)
     session.commit()
     eaten = total(store.macros_of(entry) for entry in entries)
     meals = []
@@ -151,6 +154,8 @@ def get_day(session: DbSession, day: date, lifter: str = DEFAULT_LIFTER) -> DayO
         totals=_macros_out(eaten),
         goal=_macros_out(goal_macros) if goal_macros else None,
         remaining=_macros_out(remaining(goal_macros, eaten)) if goal_macros else None,
+        water_ml=water_ml,
+        water_goal_ml=store.DEFAULT_WATER_GOAL_ML,
     )
 
 
@@ -196,6 +201,22 @@ def delete_entry(entry_id: int, session: DbSession, lifter: str = DEFAULT_LIFTER
     if not store.delete_entry(session, owner, entry_id):
         raise HTTPException(status_code=404, detail="No such diary entry.")
     session.commit()
+
+
+class WaterRequest(BaseModel):
+    """`ml` is added to the day's total; a negative amount takes water back."""
+
+    day: date
+    ml: float = Field(ge=-5000, le=5000)
+    lifter: str = DEFAULT_LIFTER
+
+
+@router.post("/water")
+def add_water(request: WaterRequest, session: DbSession) -> dict[str, float]:
+    owner = get_or_create_lifter(session, request.lifter)
+    water_ml = store.add_water(session, owner, request.day, request.ml)
+    session.commit()
+    return {"water_ml": water_ml}
 
 
 class GoalRequest(MacrosModel):

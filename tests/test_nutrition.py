@@ -228,3 +228,17 @@ def test_saved_meals(foods):
     assert client.delete(path, params={"lifter": "ben"}).status_code == 404
     assert client.delete(path).status_code == 204
     assert client.get("/api/nutrition/meals").json() == []
+
+
+def test_water_is_tracked_per_day_and_never_goes_below_zero():
+    day = {"day": "2026-10-13"}
+    assert client.get("/api/nutrition/diary", params=day).json()["water_ml"] == 0
+    assert client.post("/api/nutrition/water", json={**day, "ml": 250}).json() == {"water_ml": 250}
+    assert client.post("/api/nutrition/water", json={**day, "ml": 500}).json() == {"water_ml": 750}
+    assert client.post("/api/nutrition/water", json={**day, "ml": -250}).json() == {"water_ml": 500}
+
+    logged = client.get("/api/nutrition/diary", params=day).json()
+    assert (logged["water_ml"], logged["water_goal_ml"]) == (500, 2500)
+    assert client.get("/api/nutrition/diary", params={"day": "2026-10-14"}).json()["water_ml"] == 0
+
+    assert client.post("/api/nutrition/water", json={**day, "ml": -900}).json() == {"water_ml": 0}

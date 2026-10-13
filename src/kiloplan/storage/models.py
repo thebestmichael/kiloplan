@@ -227,3 +227,15 @@ class SavedMealItem(Base):
     protein_g: Mapped[float]
     carbs_g: Mapped[float]
     fat_g: Mapped[float]
+
+
+class WaterDay(Base):
+    """Water drunk by a lifter on one day, in millilitres."""
+
+    __tablename__ = "water_days"
+
+    lifter_id: Mapped[int] = mapped_column(
+        ForeignKey("lifters.id", ondelete="CASCADE"), primary_key=True
+    )
+    day: Mapped[date] = mapped_column(primary_key=True)
+    ml: Mapped[float] = mapped_column(default=0.0)
