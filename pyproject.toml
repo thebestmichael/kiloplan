@@ -34,7 +34,7 @@ build-backend = "uv_build"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "tests/helpers"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ANN"]
@@ -44,4 +44,6 @@ select = ["E", "F", "I", "UP", "B", "ANN"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# shared builders and fixtures' helpers, importable from every test folder
+pythonpath = ["tests/helpers"]
 addopts = "-ra --strict-markers"

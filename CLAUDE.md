@@ -20,12 +20,16 @@ Portfolio project aimed at data engineering roles.
 ## Conventions
 - Store all weights in kg. Convert only at the display layer.
 - Type hints on all calculation code. Tests for every formula.
+- Tests mirror the source packages: tests/analytics, ingestion, storage, api,
+  assistant and pipeline. A test goes in the folder of the code it exercises;
+  anything that goes through an HTTP endpoint goes in tests/api. Shared builders
+  live in tests/helpers and shared fixtures in tests/conftest.py.
 - SQL transformations go in dbt. Python handles API calls, progression
   logic, and the chatbot.
 - The dbt project in dbt/ reads the raw Parquet files as sources and must stay
   portable SQL, so the same models can run on Snowflake. Formulas that exist in
   both Python and SQL (e1RM, volume) are checked against each other in
-  tests/test_pipeline.py.
+  tests/pipeline/test_pipeline.py.
 - The assistant's volume and macro tools read the dbt tables, so they are only as
   fresh as the last pipeline run, and every such answer says when that was.
   Account tables (users, sessions) are never exported.

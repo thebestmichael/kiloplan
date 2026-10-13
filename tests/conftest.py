@@ -1,9 +1,13 @@
 import pytest
-from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from accounts import sign_up
 from kiloplan.api.main import app
+from kiloplan.ingestion.usda import load_foods, read_foods
 from kiloplan.storage.db import create_db_engine, get_session
+from kiloplan.storage.models import Food
+from usda_data import write_usda_zip
 
 
 @pytest.fixture
@@ -31,17 +35,21 @@ def api_uses_test_database(request):
     app.dependency_overrides.clear()
 
 
-def sign_up(email="ben@example.com", name="Ben", password="correct horse"):
-    """A separate browser, signed up and logged in."""
-    client = TestClient(app)
-    response = client.post(
-        "/api/auth/signup", json={"email": email, "name": name, "password": password}
-    )
-    assert response.status_code == 200, response.text
-    return client
-
-
 @pytest.fixture
 def ben():
     """Another lifter with their own account, created before the test adds any data."""
     return sign_up()
+
+
+@pytest.fixture
+def usda_zip(tmp_path):
+    """A small USDA archive on disk."""
+    return write_usda_zip(tmp_path / "foods.zip")
+
+
+@pytest.fixture
+def foods(usda_zip, session):
+    """The archive's foods loaded into the database, as {name: id}."""
+    load_foods(session, read_foods(usda_zip))
+    session.commit()
+    return {food.name: food.id for food in session.scalars(select(Food))}
