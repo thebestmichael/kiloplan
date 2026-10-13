@@ -1,14 +1,15 @@
 # KiloPlan
 
-Powerlifting data platform: workout and nutrition logging, e1RM analytics,
-4-week block programming from lifter feedback, and an assistant that answers a
-lifter's questions about their own uploaded program.
+Powerlifting app with three parts: gym calculators (RPE load, plates, rep
+maxes, points, meet attempts), a food diary with macro tracking, and an
+assistant that answers a lifter's questions about their own uploaded program.
 Portfolio project aimed at data engineering roles.
 
 ## Stack
 - Python 3.12, pandas, FastAPI, pytest, ruff
 - Frontend: React + TypeScript (Vite) in frontend/
 - App database: SQLite via SQLAlchemy (data/kiloplan.db, gitignored)
+- Food data: USDA FoodData Central SR Legacy, loaded into the app database
 - Assistant: local model through Ollama with tool calling, behind the ChatModel
   interface in src/kiloplan/chatbot/llm.py
 - Warehouse: Snowflake. Transformations: dbt (SQL)
@@ -35,6 +36,9 @@ Portfolio project aimed at data engineering roles.
   assistant says so and asks; it does not guess.
 - Pain or injury input must tell the user to see a professional, with no load
   advice.
+- Food nutrients are stored per 100 g. A diary entry copies its macros when it
+  is logged, so later changes to a food never rewrite past days.
+- Points formulas (Wilks, DOTS, IPF GL) follow OpenPowerlifting's coefficients.
 
 ## Commands
 - Install deps / create .venv: `uv sync`
@@ -44,6 +48,7 @@ Portfolio project aimed at data engineering roles.
 - Start API (port 8000): `uv run uvicorn kiloplan.api.main:app --reload`
 - Start frontend (port 5173, proxies /api to the API): `cd frontend && npm run dev`
 - Frontend lint / build: `cd frontend && npm run lint`, `npm run build`
+- Load USDA foods (once, downloads about 6 MB): `uv run python -m kiloplan.ingestion.usda`
 - Assistant model: `ollama serve`, then `ollama pull qwen2.5:7b` once. Change the
   model with KILOPLAN_LLM_MODEL. Tests use ScriptedModel and need no model running.
 
