@@ -945,3 +945,8 @@ fieldset .choice {
 .inline-form button {
   padding: 12px 16px;
 }
+
+.water-add .unit-field {
+  flex: none;
+  width: 92px;
+}

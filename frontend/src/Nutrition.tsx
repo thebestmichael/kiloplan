@@ -66,6 +66,31 @@ const RING_MACROS: { key: keyof Macros; label: string; colour: string }[] = [
   { key: 'fat_g', label: 'Fat', colour: 'var(--fat)' },
 ]
 const KG_PER_LB = 0.45359237
+
+type WaterUnit = 'L' | 'ml' | 'oz'
+
+// millilitres per unit; oz is the US fluid ounce
+const WATER_UNITS: Record<WaterUnit, { ml: number; example: string; digits: number }> = {
+  L: { ml: 1000, example: '0.5', digits: 2 },
+  ml: { ml: 1, example: '500', digits: 0 },
+  oz: { ml: 29.5735, example: '16', digits: 0 },
+}
+const WATER_UNIT_KEY = 'water-unit'
+
+function savedWaterUnit(): WaterUnit {
+  try {
+    const saved = localStorage.getItem(WATER_UNIT_KEY)
+    if (saved === 'L' || saved === 'ml' || saved === 'oz') return saved
+  } catch {
+    // storage unavailable: use the default
+  }
+  return 'L'
+}
+
+function showWater(ml: number, unit: WaterUnit): string {
+  const { ml: size, digits } = WATER_UNITS[unit]
+  return `${Number((ml / size).toFixed(digits))} ${unit}`
+}
 const EMPTY_MACROS = { kcal: '', protein_g: '', carbs_g: '', fat_g: '' }
 const SEARCH_DELAY_MS = 250
 
@@ -329,7 +354,8 @@ function Nutrition() {
   const [editingGoal, setEditingGoal] = useState(false)
   const [goal, setGoal] = useState<Record<string, string>>(EMPTY_MACROS)
   const [error, setError] = useState<string | null>(null)
-  const [waterLitres, setWaterLitres] = useState('')
+  const [waterAmount, setWaterAmount] = useState('')
+  const [waterUnit, setWaterUnit] = useState<WaterUnit>(savedWaterUnit)
   const [editingWeight, setEditingWeight] = useState(false)
   const [weight, setWeight] = useState('')
   const [weightUnit, setWeightUnit] = useState<'kg' | 'lb'>('kg')
@@ -380,7 +406,15 @@ function Nutrition() {
     setEditingGoal(true)
   }
 
-  const litres = (ml: number) => `${Number((ml / 1000).toFixed(2))}L`
+  function changeWaterUnit(unit: WaterUnit) {
+    setWaterUnit(unit)
+    setWaterAmount('')
+    try {
+      localStorage.setItem(WATER_UNIT_KEY, unit)
+    } catch {
+      // storage unavailable: the choice just lasts for this page load
+    }
+  }
 
   return (
     <>
@@ -475,9 +509,9 @@ function Nutrition() {
               <div className="grow">
                 <h2>Water Intake</h2>
                 <span className="muted">
-                  {litres(data.water_ml)}
+                  {showWater(data.water_ml, waterUnit)}
                   {data.water_recommended_ml !== null &&
-                    ` of ${litres(data.water_recommended_ml)} recommended`}
+                    ` of ${showWater(data.water_recommended_ml, waterUnit)} recommended`}
                 </span>
               </div>
             </div>
@@ -494,24 +528,35 @@ function Nutrition() {
               className="water-add"
               onSubmit={(event) => {
                 event.preventDefault()
-                const ml = Number(waterLitres) * 1000
+                const ml = Number(waterAmount) * WATER_UNITS[waterUnit].ml
                 if (!(ml > 0)) return
-                void run(() => api('/water', 'POST', { day, ml })).then(() => setWaterLitres(''))
+                void run(() => api('/water', 'POST', { day, ml })).then(() => setWaterAmount(''))
               }}
             >
               <label>
-                Add water (L)
+                Add water
                 <input
                   type="number"
                   min="0"
                   step="any"
                   inputMode="decimal"
-                  placeholder="e.g. 0.5"
-                  value={waterLitres}
-                  onChange={(event) => setWaterLitres(event.target.value)}
+                  placeholder={`e.g. ${WATER_UNITS[waterUnit].example}`}
+                  value={waterAmount}
+                  onChange={(event) => setWaterAmount(event.target.value)}
                 />
               </label>
-              <button type="submit" className="round-button" aria-label="Add water" disabled={!(Number(waterLitres) > 0)}>
+              <label className="unit-field">
+                Unit
+                <select
+                  value={waterUnit}
+                  onChange={(event) => changeWaterUnit(event.target.value as WaterUnit)}
+                >
+                  <option value="L">L</option>
+                  <option value="ml">ml</option>
+                  <option value="oz">fl oz</option>
+                </select>
+              </label>
+              <button type="submit" className="round-button" aria-label="Add water" disabled={!(Number(waterAmount) > 0)}>
                 <Icon name="plus" size={20} />
               </button>
             </form>
