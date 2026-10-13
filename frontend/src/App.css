@@ -953,9 +953,26 @@ fieldset .choice {
 
 /* ---------- account ---------- */
 
+/* at the right-hand end of the top bar */
 .profile {
   position: relative;
   flex: none;
+  margin-left: auto;
+}
+
+/* phones: the bar is at the bottom, so the button sits at the top right of the page */
+@media (max-width: 640px) {
+  .profile {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 20;
+    margin: 0;
+  }
+
+  .page-head {
+    padding-right: 52px;
+  }
 }
 
 .avatar {

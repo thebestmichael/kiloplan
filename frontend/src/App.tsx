@@ -84,6 +84,12 @@ function App() {
             </a>
           ))}
         </div>
+        <ProfileMenu
+          user={user}
+          theme={theme}
+          onToggleTheme={() => chooseTheme(theme === 'dark' ? 'light' : 'dark')}
+          onLogOut={() => void logOut()}
+        />
       </nav>
 
       {/* remounting on a change of account makes every page load that account's data */}
@@ -93,12 +99,6 @@ function App() {
             <h1>{current.label}</h1>
             <p>{current.subtitle}</p>
           </div>
-          <ProfileMenu
-            user={user}
-            theme={theme}
-            onToggleTheme={() => chooseTheme(theme === 'dark' ? 'light' : 'dark')}
-            onLogOut={() => void logOut()}
-          />
         </header>
         {page === 'calculator' && <Calculator />}
         {page === 'program' && <Program />}
