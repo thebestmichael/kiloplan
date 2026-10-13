@@ -1,4 +1,10 @@
-"""Estimated one-rep max (e1RM) formulas. All weights in kg."""
+"""Estimated one-rep max (e1RM) formulas. All weights in kg.
+
+RPE is turned into reps in reserve (10 - RPE). Published RPE charts stop at RPE 6;
+below that the same reps-in-reserve rule is applied as an extrapolation, and
+`below_chart_range` tells callers to say so, because lifters judge "six or more
+reps left" poorly.
+"""
 
 from collections.abc import Callable
 
@@ -9,6 +15,7 @@ BRZYCKI_MAX_REPS = 36
 HYBRID_SWITCH_REPS = 10
 MIN_RPE = 1.0
 MAX_RPE = 10.0
+CHART_MIN_RPE = 6.0
 
 
 def _validate(weight_kg: float, reps: float) -> None:
@@ -21,6 +28,11 @@ def _validate(weight_kg: float, reps: float) -> None:
 def _validate_rpe(rpe: float) -> None:
     if not MIN_RPE <= rpe <= MAX_RPE:
         raise ValueError(f"rpe must be between {MIN_RPE} and {MAX_RPE}, got {rpe}")
+
+
+def below_chart_range(rpe: float) -> bool:
+    """True when an RPE is under the charted range, so its result is an extrapolation."""
+    return rpe < CHART_MIN_RPE
 
 
 def epley(weight_kg: float, reps: float) -> float:

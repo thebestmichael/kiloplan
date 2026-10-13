@@ -236,3 +236,9 @@ dbt/logs/
 crash.log
 *.tfvars
 !*.tfvars.example
+
+# Personal sample data, not for the public repo
+samplespreadsheet/
+
+# Local application database
+data/
