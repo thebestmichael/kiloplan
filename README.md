@@ -101,8 +101,7 @@ cd frontend && npm run lint && npm run build
 ## Status
 
 This is a personal project that runs locally. Not built yet: S3 and Snowflake targets for
-the pipeline, a block programming generator, branded foods, password reset, and
-deployment.
+the pipeline, branded foods, password reset, and deployment.
 
 ## License
 

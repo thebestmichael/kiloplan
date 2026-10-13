@@ -1,7 +1,7 @@
 [project]
 name = "kiloplan"
 version = "0.1.0"
-description = "Powerlifting data platform: logging, e1RM analytics, block programming, and a warm-up chatbot."
+description = "Powerlifting app: gym calculators, a food diary, and an assistant for your own training program."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
