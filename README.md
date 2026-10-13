@@ -6,6 +6,7 @@ answers questions about your own training program.
 <p>
   <img src="docs/screenshots/calculator.png" alt="Plate calculator showing a loaded bar" width="260">
   <img src="docs/screenshots/nutrition.png" alt="Food diary with calorie and macro rings (example figures)" width="260">
+  <img src="docs/screenshots/assistant.png" alt="The program assistant answering a load question from a logged set" width="260">
 </p>
 
 ## What it does
@@ -29,6 +30,10 @@ answers questions about your own training program.
 - A local language model chooses which tools to call. Every number in an answer comes
   from a lookup or a calculator, never from the model, and the answer names the logged
   set it used.
+
+The third screenshot above is a real answer from the local model, asked about an
+example program: it found the logged set, calculated the load, and flagged that the
+target RPE is below the usual chart range.
 
 **Accounts**
 - Sign up and log in to keep your own program, diary and settings. The app also works
