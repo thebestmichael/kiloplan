@@ -1,0 +1,34 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      The app database's tables, exported as Parquet by `kiloplan.pipeline.export`.
+      On DuckDB each table is read straight from its file.
+    meta:
+      external_location: "{{ env_var('KILOPLAN_LAKE_PATH', 'data/lake/raw') }}/{name}.parquet"
+    tables:
+      - name: uploads
+        columns:
+          - name: id
+            data_tests: [not_null, unique]
+      - name: blocks
+        columns:
+          - name: id
+            data_tests: [not_null, unique]
+      - name: weeks
+        columns:
+          - name: id
+            data_tests: [not_null, unique]
+      - name: program_rows
+        columns:
+          - name: id
+            data_tests: [not_null, unique]
+      - name: foods
+        columns:
+          - name: id
+            data_tests: [not_null, unique]
+      - name: diary_entries
+        columns:
+          - name: id
+            data_tests: [not_null, unique]

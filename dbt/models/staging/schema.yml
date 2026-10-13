@@ -1,0 +1,54 @@
+version: 2
+
+models:
+  - name: stg_weeks
+    columns:
+      - name: week_id
+        data_tests: [not_null, unique]
+      - name: lifter_id
+        data_tests: [not_null]
+      - name: week_sequence
+        data_tests: [not_null]
+
+  - name: stg_program_rows
+    columns:
+      - name: program_row_id
+        data_tests: [not_null, unique]
+      - name: week_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_weeks')
+                field: week_id
+      - name: lift
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [squat, bench, deadlift, other]
+
+  - name: stg_foods
+    columns:
+      - name: food_id
+        data_tests: [not_null, unique]
+      - name: source
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [usda, custom]
+
+  - name: stg_diary_entries
+    columns:
+      - name: diary_entry_id
+        data_tests: [not_null, unique]
+      - name: meal
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [breakfast, lunch, dinner, snacks]
+      - name: food_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_foods')
+                field: food_id

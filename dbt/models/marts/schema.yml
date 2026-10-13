@@ -1,0 +1,38 @@
+version: 2
+
+models:
+  - name: int_training_sets
+    columns:
+      - name: program_row_id
+        data_tests: [not_null, unique]
+      - name: volume_kg
+        data_tests: [not_null]
+      - name: lift
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [squat, bench, deadlift]
+
+  - name: fct_weekly_volume
+    description: Training volume per lifter, week and lift. Read by the assistant.
+    columns:
+      - name: weekly_volume_id
+        data_tests: [not_null, unique]
+      - name: volume_kg
+        data_tests: [not_null]
+
+  - name: fct_weekly_e1rm
+    description: Best estimated one-rep max per lifter, week, lift and variation.
+    columns:
+      - name: weekly_e1rm_id
+        data_tests: [not_null, unique]
+      - name: best_e1rm_kg
+        data_tests: [not_null]
+
+  - name: fct_daily_macros
+    description: Calories and macros per lifter per day. Read by the assistant.
+    columns:
+      - name: daily_macros_id
+        data_tests: [not_null, unique]
+      - name: kcal
+        data_tests: [not_null]
