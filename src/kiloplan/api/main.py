@@ -9,7 +9,6 @@ from zipfile import BadZipFile
 from fastapi import Depends, FastAPI, HTTPException, UploadFile
 from openpyxl.utils.exceptions import InvalidFileException
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
 
 from kiloplan.analytics import scoring
 from kiloplan.analytics.attempts import select_attempts
@@ -28,20 +27,19 @@ from kiloplan.analytics.e1rm import (
     weight_for_rpe,
 )
 from kiloplan.analytics.plates import bar_total, load_bar
+from kiloplan.api import nutrition
+from kiloplan.api.deps import DEFAULT_LIFTER, DbSession
 from kiloplan.chatbot.assistant import Assistant
 from kiloplan.chatbot.llm import ChatModel, ModelUnavailableError, OllamaModel
 from kiloplan.chatbot.tools import ProgramTools
 from kiloplan.ingestion.coach_sheet import parse_workbook
-from kiloplan.storage.db import get_session
 from kiloplan.storage.models import Upload
 from kiloplan.storage.program_store import latest_upload, store_program
 
 app = FastAPI(title="KiloPlan")
+app.include_router(nutrition.router)
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
-DEFAULT_LIFTER = "default"
-
-DbSession = Annotated[Session, Depends(get_session)]
 
 FORMULAS = {
     "hybrid": (hybrid, hybrid_weight),
