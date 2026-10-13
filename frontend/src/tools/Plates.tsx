@@ -21,9 +21,10 @@ const DEFAULT_STOCK: Record<Unit, PlateStock[]> = {
     weight,
     pairs: weight === 25 ? 8 : 1,
   })),
-  lb: [45, 35, 25, 10, 5, 2.5].map((weight) => ({
+  // the red 55 starts at 0 pairs so loads default to 45s; it is always in "What's on the bar"
+  lb: [55, 45, 35, 25, 10, 5, 2.5].map((weight) => ({
     weight,
-    pairs: weight === 45 ? 8 : weight === 10 ? 2 : 1,
+    pairs: weight === 55 ? 0 : weight === 45 ? 8 : weight === 10 ? 2 : 1,
   })),
 }
 const DEFAULT_BAR: Record<Unit, string> = { kg: '20', lb: '45' }
@@ -48,7 +49,17 @@ function plateColour(weight: number, unit: Unit): string {
 function loadStock(): Record<Unit, PlateStock[]> {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null')
-    if (saved?.kg && saved?.lb) return saved as Record<Unit, PlateStock[]>
+    if (saved?.kg && saved?.lb) {
+      // plates added to the defaults since the inventory was saved
+      const merged = (unit: Unit): PlateStock[] =>
+        [
+          ...(saved[unit] as PlateStock[]),
+          ...DEFAULT_STOCK[unit].filter(
+            (plate) => !(saved[unit] as PlateStock[]).some((kept) => kept.weight === plate.weight),
+          ),
+        ].sort((a, b) => b.weight - a.weight)
+      return { kg: merged('kg'), lb: merged('lb') }
+    }
   } catch {
     // unreadable or blocked storage: fall back to the defaults
   }
@@ -56,7 +67,7 @@ function loadStock(): Record<Unit, PlateStock[]> {
 }
 
 function Barbell({ perSide, unit }: { perSide: number[]; unit: Unit }) {
-  const heaviest = unit === 'lb' ? 45 : 25
+  const heaviest = unit === 'lb' ? 55 : 25
   return (
     <div className="barbell" role="img" aria-label={`One side: ${perSide.join(', ') || 'empty'}`}>
       <span className="barbell-shaft" />
@@ -240,7 +251,7 @@ function Plates({ unit }: { unit: Unit }) {
                   data-index={index}
                   className="plate removable"
                   style={{
-                    height: `${Math.max(34, Math.min(100, (weight / (unit === 'lb' ? 45 : 25)) * 100))}%`,
+                    height: `${Math.max(34, Math.min(100, (weight / (unit === 'lb' ? 55 : 25)) * 100))}%`,
                     background: plateColour(weight, unit),
                   }}
                 >
