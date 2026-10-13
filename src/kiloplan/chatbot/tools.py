@@ -5,6 +5,7 @@ its own `status` in code and returns loads in both kg and lb, already rounded fo
 display.
 """
 
+import inspect
 from collections.abc import Callable
 from typing import Any
 
@@ -270,19 +271,45 @@ class ProgramTools:
         }
 
     def _basis(
-        self, set_id: int | None, load: float | None, unit: str, reps: int | None, rpe: float | None
+        self,
+        set_id: int | None,
+        lift: str | None,
+        variation: str | None,
+        stated_load: float | None,
+        unit: str,
+        stated_reps: int | None,
+        stated_rpe: float | None,
     ) -> tuple[float, int, float, Result | None, str] | Result:
-        """Resolve a calculation's inputs to (load_kg, reps, rpe, set, rpe_source) or an error."""
-        if set_id is None:
-            if load is None or reps is None or rpe is None:
-                message = "Give either set_id, or load, reps and rpe."
+        """Resolve a calculation's inputs to (load_kg, reps, rpe, set, rpe_source) or an error.
+
+        The basis is a logged set (set_id), else a set the lifter stated in full, else
+        the lift's latest top set.
+        """
+        rpe = stated_rpe
+        chosen_by = None
+        if set_id is None and stated_load is not None:
+            if stated_reps is None or stated_rpe is None:
+                message = "A stated set needs stated_load, stated_reps and stated_rpe."
                 return {"status": "invalid_input", "message": message}
-            return _to_kg(load, unit), reps, rpe, None, "stated"
+            return _to_kg(stated_load, unit), stated_reps, stated_rpe, None, "stated"
+        if set_id is None:
+            if lift is None:
+                message = (
+                    "Say what to base this on: set_id of a logged set, or lift to use the "
+                    "latest top set, or stated_load with stated_reps and stated_rpe."
+                )
+                return {"status": "invalid_input", "message": message}
+            top = self.latest_top_set(lift, variation)
+            if top["status"] != "ok":
+                return top
+            set_id, chosen_by = top["set"]["set_id"], top["rule"]
         row = self.session.get(ProgramRow, set_id)
         upload = self._upload()
         if row is None or upload is None or row.week.block.upload_id != upload.id:
             return {"status": "no_match", "message": f"No logged set has set_id {set_id}."}
         described = describe_set(row)
+        if chosen_by:
+            described["chosen_by"] = chosen_by
         if row.load_kg is None or not row.reps:
             message = "That set has no usable load or rep count."
             return {"status": "cannot_calculate", "message": message, "set": described}
@@ -338,13 +365,15 @@ class ProgramTools:
     def estimate_e1rm(
         self,
         set_id: int | None = None,
-        load: float | None = None,
+        lift: str | None = None,
+        variation: str | None = None,
+        stated_load: float | None = None,
         unit: str = "lb",
-        reps: int | None = None,
-        rpe: float | None = None,
+        stated_reps: int | None = None,
+        stated_rpe: float | None = None,
     ) -> Result:
-        """Estimated one-rep max from a logged set (by set_id) or from load, reps and RPE."""
-        basis = self._basis(set_id, load, unit, reps, rpe)
+        """Estimated one-rep max from a logged set, a lift's latest top set, or a stated set."""
+        basis = self._basis(set_id, lift, variation, stated_load, unit, stated_reps, stated_rpe)
         if isinstance(basis, dict):
             return basis
         return self._finish(self._estimate(basis))
@@ -354,13 +383,15 @@ class ProgramTools:
         target_reps: int,
         target_rpe: float,
         set_id: int | None = None,
-        load: float | None = None,
+        lift: str | None = None,
+        variation: str | None = None,
+        stated_load: float | None = None,
         unit: str = "lb",
-        reps: int | None = None,
-        rpe: float | None = None,
+        stated_reps: int | None = None,
+        stated_rpe: float | None = None,
     ) -> Result:
-        """Load for a prescription (reps at an RPE), from a logged set or a stated set."""
-        basis = self._basis(set_id, load, unit, reps, rpe)
+        """Load for a prescription (target_reps at target_rpe), from one basis set."""
+        basis = self._basis(set_id, lift, variation, stated_load, unit, stated_reps, stated_rpe)
         if isinstance(basis, dict):
             return basis
         estimate = self._estimate(basis)
@@ -388,11 +419,24 @@ class ProgramTools:
             "target_load": self.target_load,
         }
         if name not in tools:
-            return {"status": "invalid_input", "message": f"Unknown tool {name!r}."}
+            message = f"There is no tool {name!r}. Tools: {', '.join(tools)}."
+            return {"status": "invalid_input", "message": message}
+        # models send "" or null for parameters they mean to leave out
+        given = {key: value for key, value in arguments.items() if value not in (None, "")}
+        parameters = inspect.signature(tools[name]).parameters
+        unknown = sorted(set(given) - set(parameters))
+        missing = [
+            key
+            for key, parameter in parameters.items()
+            if parameter.default is inspect.Parameter.empty and key not in given
+        ]
+        if unknown or missing:
+            problems = [f"it has no parameter {key}" for key in unknown]
+            problems += [f"{key} is required" for key in missing]
+            message = f"{name} was called wrongly: {'; '.join(problems)}. Its parameters are: "
+            return {"status": "invalid_input", "message": message + ", ".join(parameters) + "."}
         try:
-            return tools[name](
-                **{key: value for key, value in arguments.items() if value is not None}
-            )
+            return tools[name](**given)
         except (TypeError, ValueError) as error:
             return {"status": "invalid_input", "message": str(error)}
 
@@ -407,13 +451,18 @@ _VARIATION = {
 }
 _UNIT = {"type": "string", "enum": ["lb", "kg"], "description": "Unit of the load given."}
 _BASIS = {
-    "set_id": {"type": "integer", "description": "set_id of a logged set from a lookup tool."},
-    "load": {"type": "number", "description": "Load of a set the lifter stated; not with set_id."},
-    "unit": _UNIT,
-    "reps": {"type": "integer", "description": "Reps of the stated set; not with set_id."},
-    "rpe": {
+    "set_id": {"type": "integer", "description": "set_id of a logged set, from find_sets."},
+    "lift": {**_LIFT, "description": "Base it on this lift's latest top set (no set_id needed)."},
+    "variation": _VARIATION,
+    "stated_load": {
         "type": "number",
-        "description": "RPE of the stated set, or of a logged set whose RPE was not logged.",
+        "description": "Load of a past set the lifter stated. Only when there is no logged set.",
+    },
+    "unit": _UNIT,
+    "stated_reps": {"type": "integer", "description": "Reps of that stated past set."},
+    "stated_rpe": {
+        "type": "number",
+        "description": "RPE of that stated past set, or of a logged set whose RPE is not logged.",
     },
 }
 
@@ -431,9 +480,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "variation": _VARIATION,
                 "week_number": {"type": "integer", "description": "Week within its block."},
                 "block": {"type": "integer", "description": "Block number, 1 is the oldest."},
-                "reps": {"type": "integer"},
-                "stated_load": {"type": "number"},
-                "stated_rpe": {"type": "number"},
+                "reps": {"type": "integer", "description": "Reps of the past set."},
+                "stated_load": {"type": "number", "description": "Load the lifter said."},
+                "stated_rpe": {"type": "number", "description": "RPE the lifter said."},
                 "unit": _UNIT,
             },
             "required": ["lift"],
@@ -441,10 +490,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "latest_top_set",
-        "description": (
-            "The lifter's most recent top set of a lift with RPE 6 or higher. Use when the "
-            "lifter does not name a past set."
-        ),
+        "description": "The lifter's most recent top set of a lift with RPE 6 or higher.",
         "parameters": {
             "type": "object",
             "properties": {"lift": _LIFT, "variation": _VARIATION},
@@ -453,20 +499,24 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "estimate_e1rm",
-        "description": "Estimated one-rep max from a logged set (set_id) or a stated set.",
+        "description": (
+            "Estimated one-rep max. Base it on a logged set (set_id), or on a lift's latest "
+            "top set (lift)."
+        ),
         "parameters": {"type": "object", "properties": _BASIS, "required": []},
     },
     {
         "name": "target_load",
         "description": (
-            "The load to use for a prescription of target_reps at target_rpe, based on a logged "
-            "set (set_id) or a stated set. Returns the e1RM it used as well."
+            "The weight to use for the new prescription: target_reps at target_rpe. Base it on "
+            "a logged set (set_id from find_sets) when the lifter names a past set, or on a "
+            "lift's latest top set (lift) when they do not. Returns the e1RM it used as well."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "target_reps": {"type": "integer"},
-                "target_rpe": {"type": "number"},
+                "target_reps": {"type": "integer", "description": "Reps the lifter will do."},
+                "target_rpe": {"type": "number", "description": "RPE the lifter should hit."},
                 **_BASIS,
             },
             "required": ["target_reps", "target_rpe"],

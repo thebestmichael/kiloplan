@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from kiloplan.chatbot.llm import ChatModel, Message, ModelTurn
+from kiloplan.chatbot.llm import ChatModel, Message, ModelTurn, ToolCall
 from kiloplan.chatbot.tools import BELOW_CHART_NOTE, TOOL_SCHEMAS, ProgramTools
 
 MAX_MODEL_TURNS = 8
@@ -29,14 +29,30 @@ lifter's own logged training using the tools provided.
 Rules:
 - Never do arithmetic or unit conversion yourself, and never estimate. Every number you \
 write must be copied exactly from a tool result or from the lifter's question.
-- To find the set a lifter describes, call find_sets and pass what they said \
-(stated_load, stated_rpe, unit). If they do not name a set, call latest_top_set.
-- To answer "what weight should I take", call target_load with the set_id you found.
+- When the lifter describes a past set, first call find_sets and pass what they said \
+(week_number, reps, stated_load, stated_rpe, unit). Then call target_load with that \
+set_id plus target_reps and target_rpe.
+- When the lifter names no past set, call target_load with lift, target_reps and \
+target_rpe. It uses their latest top set.
+- target_reps and target_rpe are the new set the lifter is about to do, never the past set.
+- For a question about their max or e1RM, call estimate_e1rm with lift. A logged set's \
+load is not a one-rep max.
 - If a tool result's status is not "ok", do not give a load. Tell the lifter what the \
 tool found and ask them what to do.
 - Say which logged set the answer is based on.
 - Do not swap in a different lift variation without asking.
 - Keep the answer to a few sentences, in the unit the lifter used.
+- A single is 1 rep, a double is 2 and a triple is 3.
+
+Examples of the right tool calls:
+- "What should I bench for 5 at RPE 7?" -> target_load(lift="bench", target_reps=5, \
+target_rpe=7)
+- "What should I take for a paused squat triple at RPE 8?" -> target_load(lift="squat", \
+variation="paused", target_reps=3, target_rpe=8)
+- "I did 300 for 4 on bench in week 2 at RPE 8. What should I take for 6 at RPE 7?" -> \
+find_sets(lift="bench", week_number=2, reps=4, stated_load=300, stated_rpe=8), then \
+target_load(set_id=<the set_id it returned>, target_reps=6, target_rpe=7)
+- "What is my deadlift max?" -> estimate_e1rm(lift="deadlift")
 """
 
 PAIN_WORDS = re.compile(
@@ -59,6 +75,7 @@ NO_ANSWER = (
 # a number not glued to a letter on its left (so not the 1 in "e1RM" or the 5 in "J5")
 NUMBER = re.compile(r"(?<![A-Za-z\d.])\d+(?:\.\d+)?")
 ONE_REP_MAX = re.compile(r"\b1\s*-?\s*(rm|rep max)\b", re.IGNORECASE)
+MAX_CLAIM = re.compile(r"\b(e1rm|1\s*-?\s*rm|one[- ]rep max|max)\b", re.IGNORECASE)
 LIST_MARKER = re.compile(r"^\s*\d+[.)]\s", re.MULTILINE)
 
 
@@ -112,6 +129,37 @@ def unsupported_numbers(answer: str, question: str, calculations: list[Calculati
     return numbers_in(answer) - allowed
 
 
+def answer_problems(text: str, question: str, calculations: list[Calculation]) -> list[str]:
+    """What is wrong with a drafted answer, as instructions for the model to fix it."""
+    if not text:
+        return []
+    problems = []
+    invented = unsupported_numbers(text, question, calculations)
+    if invented:
+        listed = ", ".join(f"{number:g}" for number in sorted(invented))
+        problems.append(
+            f"Your answer used numbers that are not in any tool result: {listed}. Use only "
+            "numbers copied exactly from the tool results. Do not round."
+        )
+    calculated = [
+        calc
+        for calc in calculations
+        if calc.tool in CALCULATION_TOOLS and calc.result.get("status") == "ok"
+    ]
+    written = numbers_in(text)
+    if not calculated and written and MAX_CLAIM.search(text):
+        problems.append(
+            "You gave a one-rep max without calculating it. A logged set's load is not a "
+            "one-rep max. Call estimate_e1rm with the lift or set_id and report its e1rm."
+        )
+    if calculated:
+        result = calculated[-1].result
+        key = "target_load" if calculated[-1].tool == "target_load" else "e1rm"
+        if not written & {result[f"{key}_lb"], result[f"{key}_kg"]}:
+            problems.append(f"Your answer must state the result: {result[f'{key}_text']}.")
+    return problems
+
+
 class Assistant:
     def __init__(self, model: ChatModel, tools: ProgramTools) -> None:
         self.model = model
@@ -128,19 +176,31 @@ class Assistant:
             {"role": "user", "content": question},
         ]
         calculations: list[Calculation] = []
-        text = self._run(messages, calculations)
+        flags: list[str] = []
+        text = self._run(messages, calculations, question)
 
         blocked = self._blocking_result(calculations)
+        if blocked and blocked.get("status") == "invalid_input":
+            problems = [
+                f"Your tool call was wrong and nothing was calculated. {blocked['message']}"
+            ]
+        else:
+            problems = [] if blocked else answer_problems(text, question, calculations)
+        if problems:
+            # one chance to put it right, by rewriting or by calling the tool it skipped
+            flags.append("answer_corrected")
+            messages.append({"role": "assistant", "content": text})
+            messages.append({"role": "user", "content": " ".join(problems)})
+            text = self._run(messages, calculations, question)
+            blocked = self._blocking_result(calculations)
+            if not blocked and answer_problems(text, question, calculations):
+                text = ""
+
         if blocked:
             return self._clarification(text, question, calculations, blocked)
-
-        flags: list[str] = []
-        if unsupported_numbers(text, question, calculations):
-            flags.append("answer_corrected")
-            text = self._retry(messages, text, question, calculations)
         return self._answered(text, calculations, flags)
 
-    def _run(self, messages: list[Message], calculations: list[Calculation]) -> str:
+    def _run(self, messages: list[Message], calculations: list[Calculation], question: str) -> str:
         """Let the model call tools until it writes an answer. Returns that text."""
         for _ in range(MAX_MODEL_TURNS):
             turn: ModelTurn = self.model.complete(messages, TOOL_SCHEMAS)
@@ -150,12 +210,56 @@ class Assistant:
                 {"role": "assistant", "content": turn.text, "tool_calls": turn.tool_calls}
             )
             for call in turn.tool_calls:
-                result = self.tools.call(call.name, call.arguments)
-                calculations.append(Calculation(call.name, call.arguments, result))
+                arguments = self._checked_arguments(call, calculations, question)
+                result = self.tools.call(call.name, arguments)
+                calculations.append(Calculation(call.name, arguments, result))
                 messages.append(
                     {"role": "tool", "tool_name": call.name, "content": json.dumps(result)}
                 )
         return ""
+
+    @staticmethod
+    def _checked_arguments(
+        call: ToolCall, calculations: list[Calculation], question: str
+    ) -> dict[str, Any]:
+        """The arguments a tool actually runs with.
+
+        Small models make up what the lifter "said", ignore the set they just looked
+        up, or invent a set_id. So a stated load or RPE that is not in the question is
+        dropped; once find_sets has found the set the lifter named, calculations for
+        that lift use it; and a set_id no lookup returned is never used.
+        """
+        arguments = dict(call.arguments)
+        asked = numbers_in(question)
+        for key in ("stated_load", "stated_rpe", "stated_reps"):
+            value = arguments.get(key)
+            if isinstance(value, int | float) and float(value) not in asked:
+                del arguments[key]
+        if call.name == "target_load" and "stated_load" not in arguments:
+            # the new set's reps and RPE sent under the past set's names
+            for stated, target in (("stated_reps", "target_reps"), ("stated_rpe", "target_rpe")):
+                if stated in arguments and target not in arguments:
+                    arguments[target] = arguments.pop(stated)
+        if call.name not in CALCULATION_TOOLS:
+            return arguments
+        known_ids: set[int] = set()
+        named: dict[str, Any] | None = None
+        for calculation in calculations:
+            if calculation.tool not in LOOKUP_TOOLS:
+                continue
+            result = calculation.result
+            listed = [result[key] for key in ("set",) if key in result]
+            for key in ("matching_sets", "logged_sets", "sets_in_that_week"):
+                listed += result.get(key, [])
+            known_ids.update(item["set_id"] for item in listed)
+            if calculation.tool == "find_sets":
+                named = result["set"] if result.get("status") == "ok" else None
+        if arguments.get("set_id") in known_ids:
+            return arguments
+        arguments.pop("set_id", None)
+        if named and arguments.get("lift") in (None, "", named["lift"]):
+            arguments["set_id"] = named["set_id"]
+        return arguments
 
     @staticmethod
     def _blocking_result(calculations: list[Calculation]) -> dict[str, Any] | None:
@@ -190,7 +294,10 @@ class Assistant:
             or ([blocked["set"]] if "set" in blocked else [])
         )
         lookups_only = [calc for calc in calculations if calc.tool in LOOKUP_TOOLS]
-        if not text or unsupported_numbers(text, question, lookups_only):
+        if blocked.get("status") == "invalid_input":
+            # a tool was called wrongly: that is the model's mistake, not the lifter's
+            text = NO_ANSWER
+        elif not text or unsupported_numbers(text, question, lookups_only):
             lines = [blocked.get("message", NO_ANSWER)]
             if found:
                 lines.append("Logged: " + "; ".join(item["description"] for item in found))
@@ -205,32 +312,6 @@ class Assistant:
             calculations=calculations,
             flags=[blocked.get("status", "no_match")],
         )
-
-    def _retry(
-        self,
-        messages: list[Message],
-        text: str,
-        question: str,
-        calculations: list[Calculation],
-    ) -> str:
-        """One chance to rewrite an answer containing numbers no tool produced."""
-        bad = ", ".join(
-            f"{number:g}" for number in sorted(unsupported_numbers(text, question, calculations))
-        )
-        messages.append({"role": "assistant", "content": text})
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    f"Your answer used numbers that are not in any tool result: {bad}. Rewrite "
-                    "it using only numbers copied exactly from the tool results. Do not round."
-                ),
-            }
-        )
-        rewritten = self._run(messages, calculations)
-        if rewritten and not unsupported_numbers(rewritten, question, calculations):
-            return rewritten
-        return ""
 
     @staticmethod
     def _template(calculations: list[Calculation]) -> str:
