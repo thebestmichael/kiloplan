@@ -134,3 +134,96 @@ class ProgramIssue(Base):
 
     upload: Mapped[Upload] = relationship(back_populates="issues")
     row: Mapped[ProgramRow | None] = relationship(back_populates="issues")
+
+
+class Food(Base):
+    """A food with nutrients per 100 g. `source` is "usda" or "custom" (one lifter's own)."""
+
+    __tablename__ = "foods"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(10), index=True)
+    fdc_id: Mapped[int | None] = mapped_column(unique=True)
+    lifter_id: Mapped[int | None] = mapped_column(ForeignKey("lifters.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(index=True)
+    category: Mapped[str] = mapped_column(default="")
+    kcal: Mapped[float]
+    protein_g: Mapped[float]
+    carbs_g: Mapped[float]
+    fat_g: Mapped[float]
+    fiber_g: Mapped[float] = mapped_column(default=0.0)
+
+    portions: Mapped[list["FoodPortion"]] = relationship(
+        cascade="all, delete-orphan", order_by="FoodPortion.id"
+    )
+
+
+class FoodPortion(Base):
+    """A household measure of a food, such as "1 cup" = 240 g."""
+
+    __tablename__ = "food_portions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    food_id: Mapped[int] = mapped_column(ForeignKey("foods.id", ondelete="CASCADE"), index=True)
+    description: Mapped[str]
+    grams: Mapped[float]
+
+
+class DiaryEntry(Base):
+    """Something eaten. Macros are copied in when logged, so later food edits do not change it."""
+
+    __tablename__ = "diary_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lifter_id: Mapped[int] = mapped_column(ForeignKey("lifters.id", ondelete="CASCADE"))
+    day: Mapped[date] = mapped_column(index=True)
+    meal: Mapped[str]
+    food_id: Mapped[int | None] = mapped_column(ForeignKey("foods.id", ondelete="SET NULL"))
+    description: Mapped[str]
+    grams: Mapped[float | None]
+    kcal: Mapped[float]
+    protein_g: Mapped[float]
+    carbs_g: Mapped[float]
+    fat_g: Mapped[float]
+
+
+class NutritionGoal(Base):
+    """A lifter's daily targets."""
+
+    __tablename__ = "nutrition_goals"
+
+    lifter_id: Mapped[int] = mapped_column(
+        ForeignKey("lifters.id", ondelete="CASCADE"), primary_key=True
+    )
+    kcal: Mapped[float]
+    protein_g: Mapped[float]
+    carbs_g: Mapped[float]
+    fat_g: Mapped[float]
+
+
+class SavedMeal(Base):
+    """A named set of foods a lifter eats together and can log in one go."""
+
+    __tablename__ = "saved_meals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lifter_id: Mapped[int] = mapped_column(ForeignKey("lifters.id", ondelete="CASCADE"))
+    name: Mapped[str]
+
+    items: Mapped[list["SavedMealItem"]] = relationship(
+        cascade="all, delete-orphan", order_by="SavedMealItem.id"
+    )
+
+
+class SavedMealItem(Base):
+    __tablename__ = "saved_meal_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    meal_id: Mapped[int] = mapped_column(ForeignKey("saved_meals.id", ondelete="CASCADE"))
+    food_id: Mapped[int | None] = mapped_column(ForeignKey("foods.id", ondelete="SET NULL"))
+    description: Mapped[str]
+    grams: Mapped[float | None]
+    kcal: Mapped[float]
+    protein_g: Mapped[float]
+    carbs_g: Mapped[float]
+    fat_g: Mapped[float]
