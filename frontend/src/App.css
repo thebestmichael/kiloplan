@@ -388,3 +388,187 @@ button {
   background: var(--bg);
   border-radius: 6px;
 }
+
+.tool-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.tool-tabs button,
+.choice button,
+button.quiet {
+  padding: 6px 14px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.tool-tabs button[aria-selected='true'],
+.choice button[aria-pressed='true'] {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.choice {
+  display: flex;
+  gap: 4px;
+  align-items: end;
+}
+
+.choice.centred {
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+label.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+label.checkbox input {
+  width: auto;
+}
+
+.table-scroll {
+  overflow: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+th,
+td {
+  padding: 6px 10px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+th.number,
+td.number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.total-line {
+  margin: 12px 0 0;
+}
+
+.score-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.score {
+  padding: 16px;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.score-value {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.barbell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 120px;
+  margin-bottom: 16px;
+  padding-left: 48px;
+  overflow-x: auto;
+}
+
+.barbell-shaft {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 10px;
+  background: var(--muted);
+  border-radius: 4px;
+}
+
+.barbell-collar,
+.barbell-end {
+  position: relative;
+  flex: none;
+  width: 10px;
+  height: 26%;
+  background: var(--muted);
+  border-radius: 2px;
+}
+
+.barbell-end {
+  width: 28px;
+  height: 14%;
+  background: transparent;
+}
+
+.plate {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0 0 3px #000000;
+  border: 1px solid rgb(0 0 0 / 40%);
+  border-radius: 4px;
+}
+
+.plate.removable {
+  cursor: pointer;
+}
+
+.plate-list {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.plate-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plate-buttons button {
+  min-width: 52px;
+  padding: 8px 10px;
+  color: var(--text);
+  background: var(--bg);
+  border: 3px solid var(--border);
+}
+
+.stock {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
