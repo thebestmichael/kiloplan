@@ -37,7 +37,8 @@ interface Day {
   goal: Macros | null
   remaining: Macros | null
   water_ml: number
-  water_goal_ml: number
+  bodyweight_kg: number | null
+  water_recommended_ml: number | null
 }
 
 interface SavedMeal {
@@ -64,7 +65,7 @@ const RING_MACROS: { key: keyof Macros; label: string; colour: string }[] = [
   { key: 'protein_g', label: 'Protein', colour: 'var(--protein)' },
   { key: 'fat_g', label: 'Fat', colour: 'var(--fat)' },
 ]
-const WATER_STEP_ML = 250
+const KG_PER_LB = 0.45359237
 const EMPTY_MACROS = { kcal: '', protein_g: '', carbs_g: '', fat_g: '' }
 const SEARCH_DELAY_MS = 250
 
@@ -328,6 +329,10 @@ function Nutrition() {
   const [editingGoal, setEditingGoal] = useState(false)
   const [goal, setGoal] = useState<Record<string, string>>(EMPTY_MACROS)
   const [error, setError] = useState<string | null>(null)
+  const [waterLitres, setWaterLitres] = useState('')
+  const [editingWeight, setEditingWeight] = useState(false)
+  const [weight, setWeight] = useState('')
+  const [weightUnit, setWeightUnit] = useState<'kg' | 'lb'>('kg')
 
   // bumped after every change, to load the day again
   const [version, setVersion] = useState(0)
@@ -470,30 +475,114 @@ function Nutrition() {
               <div className="grow">
                 <h2>Water Intake</h2>
                 <span className="muted">
-                  {litres(data.water_ml)} / {litres(data.water_goal_ml)}
+                  {litres(data.water_ml)}
+                  {data.water_recommended_ml !== null &&
+                    ` of ${litres(data.water_recommended_ml)} recommended`}
                 </span>
               </div>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label={`Remove ${WATER_STEP_ML} ml of water`}
-                disabled={data.water_ml <= 0}
-                onClick={() => void run(() => api('/water', 'POST', { day, ml: -WATER_STEP_ML }))}
-              >
-                <Icon name="minus" size={20} />
-              </button>
-              <button
-                type="button"
-                className="round-button"
-                aria-label={`Add ${WATER_STEP_ML} ml of water`}
-                onClick={() => void run(() => api('/water', 'POST', { day, ml: WATER_STEP_ML }))}
-              >
+            </div>
+
+            {data.water_recommended_ml !== null && (
+              <div className="bar">
+                <span
+                  style={{ width: `${Math.min(100, (data.water_ml / data.water_recommended_ml) * 100)}%` }}
+                />
+              </div>
+            )}
+
+            <form
+              className="water-add"
+              onSubmit={(event) => {
+                event.preventDefault()
+                const ml = Number(waterLitres) * 1000
+                if (!(ml > 0)) return
+                void run(() => api('/water', 'POST', { day, ml })).then(() => setWaterLitres(''))
+              }}
+            >
+              <label>
+                Add water (L)
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  inputMode="decimal"
+                  placeholder="e.g. 0.5"
+                  value={waterLitres}
+                  onChange={(event) => setWaterLitres(event.target.value)}
+                />
+              </label>
+              <button type="submit" className="round-button" aria-label="Add water" disabled={!(Number(waterLitres) > 0)}>
                 <Icon name="plus" size={20} />
               </button>
+            </form>
+
+            <div className="meal-actions">
+              {data.water_ml > 0 && (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => void run(() => api('/water', 'POST', { day, ml: -data.water_ml }))}
+                >
+                  Reset today's water
+                </button>
+              )}
+              {!editingWeight && (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => {
+                    setWeight(data.bodyweight_kg ? String(Number(data.bodyweight_kg.toFixed(1))) : '')
+                    setWeightUnit('kg')
+                    setEditingWeight(true)
+                  }}
+                >
+                  {data.bodyweight_kg
+                    ? `Bodyweight ${Number(data.bodyweight_kg.toFixed(1))} kg · change`
+                    : 'Add your bodyweight for a recommended amount'}
+                </button>
+              )}
             </div>
-            <div className="bar">
-              <span style={{ width: `${Math.min(100, (data.water_ml / data.water_goal_ml) * 100)}%` }} />
-            </div>
+
+            {editingWeight && (
+              <form
+                className="inline-form"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const kg = Number(weight) * (weightUnit === 'lb' ? KG_PER_LB : 1)
+                  if (!(kg > 0)) return
+                  void run(() => api('/bodyweight', 'PUT', { bodyweight_kg: kg })).then(() =>
+                    setEditingWeight(false),
+                  )
+                }}
+              >
+                <label>
+                  Bodyweight
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    autoFocus
+                    value={weight}
+                    onChange={(event) => setWeight(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Unit
+                  <select value={weightUnit} onChange={(event) => setWeightUnit(event.target.value as 'kg' | 'lb')}>
+                    <option value="kg">kg</option>
+                    <option value="lb">lb</option>
+                  </select>
+                </label>
+                <button type="submit">Save</button>
+                <button type="button" className="quiet" onClick={() => setEditingWeight(false)}>
+                  Cancel
+                </button>
+                <p className="panel-note wide-field">
+                  The recommendation is about 35 ml per kg of bodyweight: a common starting point,
+                  not a limit.
+                </p>
+              </form>
+            )}
           </section>
 
           <h2 className="section-title">{day === today ? "Today's Meals" : 'Meals'}</h2>
