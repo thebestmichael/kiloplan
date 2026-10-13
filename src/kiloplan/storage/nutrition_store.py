@@ -10,6 +10,7 @@ from kiloplan.storage.models import (
     DiaryEntry,
     Food,
     Lifter,
+    LifterProfile,
     NutritionGoal,
     SavedMeal,
     SavedMealItem,
@@ -17,7 +18,6 @@ from kiloplan.storage.models import (
 )
 
 MEALS = ("breakfast", "lunch", "dinner", "snacks")
-DEFAULT_WATER_GOAL_ML = 2500.0
 
 
 def macros_of(item: Food | DiaryEntry | SavedMealItem | NutritionGoal) -> Macros:
@@ -222,3 +222,15 @@ def add_water(session: Session, lifter: Lifter, day: date, ml: float) -> float:
     logged.ml = max(0.0, logged.ml + ml)
     session.flush()
     return logged.ml
+
+
+def get_bodyweight_kg(session: Session, lifter: Lifter) -> float | None:
+    profile = session.get(LifterProfile, lifter.id)
+    return profile.bodyweight_kg if profile else None
+
+
+def set_bodyweight_kg(session: Session, lifter: Lifter, bodyweight_kg: float) -> None:
+    profile = session.get(LifterProfile, lifter.id) or LifterProfile(lifter_id=lifter.id)
+    profile.bodyweight_kg = bodyweight_kg
+    session.add(profile)
+    session.flush()

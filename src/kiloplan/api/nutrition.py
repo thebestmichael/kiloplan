@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from kiloplan.analytics.nutrition import Macros, remaining, total
+from kiloplan.analytics.nutrition import Macros, recommended_water_ml, remaining, total
 from kiloplan.api.deps import DEFAULT_LIFTER, DbSession
 from kiloplan.storage import nutrition_store as store
 from kiloplan.storage.models import DiaryEntry, Food, SavedMeal
@@ -113,7 +113,8 @@ class DayOut(BaseModel):
     goal: SignedMacros | None
     remaining: SignedMacros | None
     water_ml: float
-    water_goal_ml: float
+    bodyweight_kg: float | None
+    water_recommended_ml: float | None
 
 
 def _entry_out(entry: DiaryEntry) -> EntryOut:
@@ -135,6 +136,7 @@ def get_day(session: DbSession, day: date, lifter: str = DEFAULT_LIFTER) -> DayO
     entries = store.entries_for_day(session, owner, day)
     goal = store.get_goal(session, owner)
     water_ml = store.water_for_day(session, owner, day)
+    bodyweight_kg = store.get_bodyweight_kg(session, owner)
     session.commit()
     eaten = total(store.macros_of(entry) for entry in entries)
     meals = []
@@ -155,7 +157,8 @@ def get_day(session: DbSession, day: date, lifter: str = DEFAULT_LIFTER) -> DayO
         goal=_macros_out(goal_macros) if goal_macros else None,
         remaining=_macros_out(remaining(goal_macros, eaten)) if goal_macros else None,
         water_ml=water_ml,
-        water_goal_ml=store.DEFAULT_WATER_GOAL_ML,
+        bodyweight_kg=bodyweight_kg,
+        water_recommended_ml=recommended_water_ml(bodyweight_kg) if bodyweight_kg else None,
     )
 
 
@@ -217,6 +220,23 @@ def add_water(request: WaterRequest, session: DbSession) -> dict[str, float]:
     water_ml = store.add_water(session, owner, request.day, request.ml)
     session.commit()
     return {"water_ml": water_ml}
+
+
+class BodyweightRequest(BaseModel):
+    bodyweight_kg: float = Field(gt=0, le=400)
+    lifter: str = DEFAULT_LIFTER
+
+
+@router.put("/bodyweight")
+def set_bodyweight(request: BodyweightRequest, session: DbSession) -> dict[str, float]:
+    """Store the lifter's bodyweight, which sets their recommended water intake."""
+    owner = get_or_create_lifter(session, request.lifter)
+    store.set_bodyweight_kg(session, owner, request.bodyweight_kg)
+    session.commit()
+    return {
+        "bodyweight_kg": request.bodyweight_kg,
+        "water_recommended_ml": recommended_water_ml(request.bodyweight_kg),
+    }
 
 
 class GoalRequest(MacrosModel):

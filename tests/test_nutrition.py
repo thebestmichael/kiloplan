@@ -4,7 +4,14 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
-from kiloplan.analytics.nutrition import Macros, for_grams, kcal_from_macros, remaining, total
+from kiloplan.analytics.nutrition import (
+    Macros,
+    for_grams,
+    kcal_from_macros,
+    recommended_water_ml,
+    remaining,
+    total,
+)
 from kiloplan.api.main import app
 from kiloplan.ingestion.usda import load_foods, read_foods
 from kiloplan.storage.models import Food
@@ -238,7 +245,38 @@ def test_water_is_tracked_per_day_and_never_goes_below_zero():
     assert client.post("/api/nutrition/water", json={**day, "ml": -250}).json() == {"water_ml": 500}
 
     logged = client.get("/api/nutrition/diary", params=day).json()
-    assert (logged["water_ml"], logged["water_goal_ml"]) == (500, 2500)
+    assert logged["water_ml"] == 500
     assert client.get("/api/nutrition/diary", params={"day": "2026-10-14"}).json()["water_ml"] == 0
 
     assert client.post("/api/nutrition/water", json={**day, "ml": -900}).json() == {"water_ml": 0}
+
+
+def test_water_has_no_upper_limit():
+    request = {"day": "2026-10-13", "ml": 4500}
+    assert client.post("/api/nutrition/water", json=request).json() == {"water_ml": 4500}
+    assert client.post("/api/nutrition/water", json=request).json() == {"water_ml": 9000}
+
+
+def test_recommended_water_is_35_ml_per_kg():
+    assert recommended_water_ml(80) == 2800
+    assert recommended_water_ml(100.5) == pytest.approx(3517.5)
+    with pytest.raises(ValueError):
+        recommended_water_ml(0)
+
+
+def test_recommended_water_appears_once_bodyweight_is_set():
+    day = {"day": "2026-10-13"}
+    before = client.get("/api/nutrition/diary", params=day).json()
+    assert (before["bodyweight_kg"], before["water_recommended_ml"]) == (None, None)
+
+    saved = client.put("/api/nutrition/bodyweight", json={"bodyweight_kg": 90}).json()
+    assert saved == {"bodyweight_kg": 90, "water_recommended_ml": 3150}
+    after = client.get("/api/nutrition/diary", params=day).json()
+    assert (after["bodyweight_kg"], after["water_recommended_ml"]) == (90, 3150)
+
+    # changing it updates the recommendation, and it is kept per lifter
+    client.put("/api/nutrition/bodyweight", json={"bodyweight_kg": 100})
+    assert client.get("/api/nutrition/diary", params=day).json()["water_recommended_ml"] == 3500
+    other = client.get("/api/nutrition/diary", params={**day, "lifter": "ben"}).json()
+    assert other["water_recommended_ml"] is None
+    assert client.put("/api/nutrition/bodyweight", json={"bodyweight_kg": 0}).status_code == 422

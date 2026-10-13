@@ -239,3 +239,14 @@ class WaterDay(Base):
     )
     day: Mapped[date] = mapped_column(primary_key=True)
     ml: Mapped[float] = mapped_column(default=0.0)
+
+
+class LifterProfile(Base):
+    """Things a lifter tells us about themselves. Bodyweight is in kg."""
+
+    __tablename__ = "lifter_profiles"
+
+    lifter_id: Mapped[int] = mapped_column(
+        ForeignKey("lifters.id", ondelete="CASCADE"), primary_key=True
+    )
+    bodyweight_kg: Mapped[float | None]

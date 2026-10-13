@@ -3,6 +3,10 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+# A common rule of thumb for daily fluid: about 35 ml per kg of bodyweight. It is a
+# starting point, not a limit, and not medical advice.
+WATER_ML_PER_KG = 35.0
+
 
 @dataclass(frozen=True)
 class Macros:
@@ -53,3 +57,10 @@ def remaining(goal: Macros, eaten: Macros) -> Macros:
 def kcal_from_macros(protein_g: float, carbs_g: float, fat_g: float) -> float:
     """Energy by the 4/4/9 rule, for foods with no energy value."""
     return 4 * protein_g + 4 * carbs_g + 9 * fat_g
+
+
+def recommended_water_ml(bodyweight_kg: float) -> float:
+    """A suggested daily water intake for a bodyweight."""
+    if bodyweight_kg <= 0:
+        raise ValueError(f"bodyweight_kg must be positive, got {bodyweight_kg}")
+    return WATER_ML_PER_KG * bodyweight_kg
