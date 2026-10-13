@@ -250,3 +250,32 @@ class LifterProfile(Base):
         ForeignKey("lifters.id", ondelete="CASCADE"), primary_key=True
     )
     bodyweight_kg: Mapped[float | None]
+
+
+class User(Base):
+    """An account. Each user owns one lifter, which holds their program, diary and settings."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(254), unique=True)
+    name: Mapped[str] = mapped_column(String(80))
+    password_hash: Mapped[str]
+    lifter_id: Mapped[int] = mapped_column(
+        ForeignKey("lifters.id", ondelete="CASCADE"), unique=True
+    )
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+    lifter: Mapped[Lifter] = relationship()
+
+
+class AuthSession(Base):
+    """A logged-in browser. Only a hash of the cookie's token is stored."""
+
+    __tablename__ = "auth_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    expires_at: Mapped[datetime]
+
+    user: Mapped[User] = relationship()
