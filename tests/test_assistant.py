@@ -185,7 +185,13 @@ def test_a_stated_rpe_that_disagrees_with_the_log_is_reported(tools):
         )
     )
     # the model pushes on with the lifter's numbers and offers a load anyway
-    stated = {"load": 405, "reps": 3, "rpe": 8, "target_reps": 2, "target_rpe": 5}
+    stated = {
+        "stated_load": 405,
+        "stated_reps": 3,
+        "stated_rpe": 8,
+        "target_reps": 2,
+        "target_rpe": 5,
+    }
     calculate = ModelTurn(tool_calls=(ToolCall("target_load", stated),))
     answer, _ = ask(tools, [lookup, calculate, say("Take 356.9 lb.")], question)
 
@@ -262,7 +268,14 @@ def test_an_answer_with_numbers_but_no_tool_calls_is_not_passed_on(tools):
 
 
 def test_a_calculation_from_stated_numbers_says_it_was_not_checked(tools):
-    stated = {"load": 405, "unit": "lb", "reps": 3, "rpe": 9, "target_reps": 2, "target_rpe": 7}
+    stated = {
+        "stated_load": 405,
+        "unit": "lb",
+        "stated_reps": 3,
+        "stated_rpe": 9,
+        "target_reps": 2,
+        "target_rpe": 7,
+    }
     calculate = ModelTurn(tool_calls=(ToolCall("target_load", stated),))
     answer, _ = ask(tools, [calculate, say("Take 392.7 lb.")])
     assert answer.status == "answered"
@@ -326,3 +339,143 @@ def test_example_question_with_the_real_model(tools):
         assert answer.basis_set["sheet_cell"] == "J5"
         assert "368.2" in answer.answer
         assert BELOW_CHART_NOTE in answer.answer
+
+
+def test_a_wrongly_called_tool_is_not_shown_to_the_lifter(tools):
+    wrong = ModelTurn(tool_calls=(ToolCall("target_load", {"reps": 3, "target_rpe": 8}),))
+    give_up = say("There was an internal error.")
+    answer, model = ask(tools, [wrong, give_up, give_up], "Squat for 3 at RPE 8?")
+    assert "Your tool call was wrong" in model.seen[-1][-1]["content"]
+    assert answer.status == "needs_clarification"
+    assert answer.flags == ["invalid_input"]
+    assert answer.answer == NO_ANSWER
+
+
+def test_a_wrong_call_can_be_corrected_by_the_model(tools):
+    wrong = ModelTurn(tool_calls=(ToolCall("target_load", {"reps": 3, "target_rpe": 8}),))
+    right = {"lift": "squat", "target_reps": 3, "target_rpe": 8}
+    fixed = ModelTurn(tool_calls=(ToolCall("target_load", right),))
+    answer, model = ask(tools, [wrong, fixed, say("Take 419.3 lb.")], "Squat for 3 at RPE 8?")
+    assert "target_reps is required" in model.seen[1][-1]["content"]
+    assert answer.status == "answered"
+    assert answer.basis_set["load_lb"] == 380.0
+    assert "Based on: Squat 1x5 at 380.0 lb (172.4 kg), RPE 7" in answer.answer
+
+
+# The next tests replay mistakes a real 7B model made on these questions.
+
+
+def test_a_calculation_is_pinned_to_the_set_the_lifter_named(tools):
+    # the model found the 405 x 3 set, then asked for the lift's latest top set instead
+    by_lift = {"lift": "squat", "target_reps": 2, "target_rpe": 5, "unit": "lb"}
+    calculate = ModelTurn(tool_calls=(ToolCall("target_load", by_lift),))
+    answer, _ = ask(tools, [FIND_THE_SET, calculate, say(GOOD_ANSWER)])
+    assert answer.status == "answered"
+    assert (answer.basis_set["load_lb"], answer.basis_set["sheet_cell"]) == (405.0, "J5")
+    assert answer.calculations[1].result["target_load_lb"] == 368.2
+    assert answer.calculations[1].arguments["set_id"] == answer.basis_set["set_id"]
+
+
+def test_a_made_up_set_id_is_replaced_by_the_named_set(tools):
+    lookup = ModelTurn(
+        tool_calls=(
+            ToolCall(
+                "find_sets",
+                {"lift": "squat", "variation": "paused", "week_number": 4, "stated_load": 365},
+            ),
+        )
+    )
+    made_up = {"set_id": 1, "lift": "squat", "variation": "paused", "target_reps": 1}
+    calculate = ModelTurn(tool_calls=(ToolCall("target_load", {**made_up, "target_rpe": 8}),))
+    answer, _ = ask(tools, [lookup, calculate, say("")], "Paused single at RPE 8?")
+    assert answer.status == "answered"
+    assert (answer.basis_set["movement"], answer.basis_set["load_lb"]) == ("Paused Squats", 365.0)
+
+
+def test_a_made_up_set_id_with_no_lookup_is_dropped(tools):
+    made_up = {"set_id": 999, "lift": "squat", "target_reps": 3, "target_rpe": 8}
+    calculate = ModelTurn(tool_calls=(ToolCall("target_load", made_up),))
+    answer, _ = ask(tools, [calculate, say("")], "What should I squat for 3 at RPE 8?")
+    assert "set_id" not in answer.calculations[0].arguments
+    assert (answer.status, answer.basis_set["load_lb"]) == ("answered", 380.0)
+
+    no_basis = ModelTurn(
+        tool_calls=(ToolCall("target_load", {"set_id": 7, "target_reps": 3, "target_rpe": 8}),)
+    )
+    answer, _ = ask(tools, [no_basis, say(""), say("")], "What should I take for 3 at RPE 8?")
+    assert (answer.status, answer.flags) == ("needs_clarification", ["invalid_input"])
+
+
+def test_a_set_found_for_one_lift_is_not_used_for_another(tools):
+    bench = {"lift": "bench", "target_reps": 5, "target_rpe": 7}
+    calculate = ModelTurn(tool_calls=(ToolCall("target_load", bench),))
+    answer, _ = ask(tools, [FIND_THE_SET, calculate, say("")], "And bench for 5 at RPE 7?")
+    assert "set_id" not in answer.calculations[1].arguments
+    assert (answer.status, answer.flags) == ("needs_clarification", ["no_match"])
+
+
+def test_a_logged_load_reported_as_a_max_is_sent_back(tools):
+    lookup = ModelTurn(tool_calls=(ToolCall("latest_top_set", {"lift": "squat"}),))
+    wrong = say("Your estimated one-rep max (1RM) is 380.0 lb (172.4 kg).")
+    estimate = ModelTurn(tool_calls=(ToolCall("estimate_e1rm", {"lift": "squat"}),))
+    answer, model = ask(
+        tools,
+        [lookup, wrong, estimate, say("Your estimated 1RM is 471.7 lb (214.0 kg).")],
+        "What's my estimated squat max?",
+    )
+    assert "A logged set's load is not a one-rep max" in model.seen[2][-1]["content"]
+    assert answer.status == "answered"
+    assert "471.7 lb" in answer.answer
+    assert "answer_corrected" in answer.flags
+
+
+def test_a_max_that_is_never_calculated_is_not_passed_on(tools):
+    lookup = ModelTurn(tool_calls=(ToolCall("latest_top_set", {"lift": "squat"}),))
+    wrong = say("Your estimated one-rep max (1RM) is 380.0 lb (172.4 kg).")
+    answer, _ = ask(tools, [lookup, wrong, wrong], "What's my estimated squat max?")
+    assert answer.answer.startswith("I found this logged set: Squat 1x5 at 380.0 lb")
+    assert "one-rep max" not in answer.answer
+
+
+def test_an_answer_that_leaves_out_the_result_is_replaced(tools):
+    vague = say("Take a bit less than your week 4 set of 405.")
+    answer, model = ask(tools, [FIND_THE_SET, target_from_found_set, vague, vague])
+    assert "must state the result: 368.2 lb (167.0 kg)" in model.seen[-1][-1]["content"]
+    assert answer.answer.startswith("Take 368.2 lb (167.0 kg) for 2 reps at RPE 5.")
+
+
+def test_a_stated_rpe_the_lifter_never_gave_is_not_checked_against_the_log(tools):
+    # the lifter gave no RPE; the model made one up that disagrees with the logged 9
+    lookup = ModelTurn(
+        tool_calls=(
+            ToolCall(
+                "find_sets",
+                {"lift": "squat", "week_number": 4, "reps": 3, "stated_load": 405, "stated_rpe": 8},
+            ),
+        )
+    )
+    question = "I took 405 for 3 on squat in week 4. What should I take for 2 reps at RPE 7?"
+
+    def calculate(messages):
+        found = json.loads(messages[-1]["content"])
+        arguments = {"set_id": found["set"]["set_id"], "target_reps": 2, "target_rpe": 7}
+        return ModelTurn(tool_calls=(ToolCall("target_load", arguments),))
+
+    answer, _ = ask(tools, [lookup, calculate, say("")], question)
+    assert "stated_rpe" not in answer.calculations[0].arguments
+    assert answer.status == "answered"
+    assert (answer.basis_set["load_lb"], answer.basis_set["rpe"]) == (405.0, "9")
+
+
+def test_the_new_sets_reps_and_rpe_sent_under_the_wrong_names_still_work(tools):
+    confused = {"lift": "squat", "stated_reps": 3, "stated_rpe": 8, "unit": "lb"}
+    calculate = ModelTurn(tool_calls=(ToolCall("target_load", confused),))
+    answer, _ = ask(tools, [calculate, say("")], "What should I squat for 3 reps at RPE 8?")
+    assert answer.calculations[0].arguments == {
+        "lift": "squat",
+        "unit": "lb",
+        "target_reps": 3,
+        "target_rpe": 8,
+    }
+    assert answer.status == "answered"
+    assert answer.answer.startswith("Take 419.3 lb (190.2 kg) for 3 reps at RPE 8.")
