@@ -950,3 +950,128 @@ fieldset .choice {
   flex: none;
   width: 92px;
 }
+
+/* ---------- account ---------- */
+
+.profile {
+  position: relative;
+  flex: none;
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 50%;
+}
+
+.avatar.large {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  font-size: 1.1rem;
+}
+
+.profile-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: 260px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 35%);
+}
+
+.profile-who {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+}
+
+.profile-who div strong,
+.profile-who div span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.profile-who div {
+  min-width: 0;
+}
+
+.profile-who div span {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.profile-menu hr {
+  margin: 6px 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+.profile-menu [role='menuitem'] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px;
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  color: var(--text);
+  background: transparent;
+  border-radius: 10px;
+}
+
+.profile-menu [role='menuitem']:hover,
+.profile-menu [role='menuitem']:focus-visible {
+  background: var(--surface-2);
+}
+
+.profile-menu .icon {
+  color: var(--muted);
+}
+
+.auth-form {
+  gap: 14px;
+}
+
+.auth-switch {
+  margin: 16px 0 0;
+  text-align: center;
+}
+
+.auth-switch a {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+a.button {
+  padding: 10px 18px;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--accent-text);
+  background: var(--accent);
+  border-radius: 12px;
+}
+
+a.button.quiet {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.setting-row {
+  margin-top: 12px;
+}
