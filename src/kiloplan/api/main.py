@@ -35,6 +35,7 @@ from kiloplan.chatbot.tools import ProgramTools
 from kiloplan.ingestion.coach_sheet import parse_workbook
 from kiloplan.storage.models import Upload
 from kiloplan.storage.program_store import latest_upload, store_program
+from kiloplan.storage.warehouse import Warehouse
 
 app = FastAPI(title="KiloPlan")
 app.include_router(auth.router)
@@ -406,7 +407,7 @@ def ask_assistant(
     model: Annotated[ChatModel, Depends(get_chat_model)],
 ) -> AssistantResponse:
     """Answer a question about the lifter's stored program. Numbers come only from tools."""
-    assistant = Assistant(model, ProgramTools(session, owner.name))
+    assistant = Assistant(model, ProgramTools(session, owner.name, Warehouse()))
     try:
         answer = assistant.ask(request.question)
     except ModelUnavailableError as error:

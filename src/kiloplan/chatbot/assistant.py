@@ -21,6 +21,8 @@ from kiloplan.chatbot.tools import BELOW_CHART_NOTE, TOOL_SCHEMAS, ProgramTools
 MAX_MODEL_TURNS = 8
 LOOKUP_TOOLS = ("find_sets", "latest_top_set")
 CALCULATION_TOOLS = ("estimate_e1rm", "target_load")
+# read the summary tables the pipeline builds
+REPORT_TOOLS = ("weekly_volume", "daily_macros")
 
 SYSTEM_PROMPT = """\
 You are KiloPlan's program assistant for a powerlifter. You answer questions about the \
@@ -43,6 +45,9 @@ tool found and ask them what to do.
 - Do not swap in a different lift variation without asking.
 - Keep the answer to a few sentences, in the unit the lifter used.
 - A single is 1 rep, a double is 2 and a triple is 3.
+- For questions about training volume or how much work was done, call weekly_volume.
+- For questions about food, calories, protein or other macros, call daily_macros. You \
+do not know today's date: the tool works it out.
 
 Examples of the right tool calls:
 - "What should I bench for 5 at RPE 7?" -> target_load(lift="bench", target_reps=5, \
@@ -53,6 +58,9 @@ variation="paused", target_reps=3, target_rpe=8)
 find_sets(lift="bench", week_number=2, reps=4, stated_load=300, stated_rpe=8), then \
 target_load(set_id=<the set_id it returned>, target_reps=6, target_rpe=7)
 - "What is my deadlift max?" -> estimate_e1rm(lift="deadlift")
+- "How much squat volume have I done lately?" -> weekly_volume(lift="squat")
+- "How much protein have I had today?" -> daily_macros(days=1)
+- "What have my calories averaged this week?" -> daily_macros(days=7)
 """
 
 PAIN_WORDS = re.compile(
@@ -152,6 +160,19 @@ def answer_problems(text: str, question: str, calculations: list[Calculation]) -
             "You gave a one-rep max without calculating it. A logged set's load is not a "
             "one-rep max. Call estimate_e1rm with the lift or set_id and report its e1rm."
         )
+    for calc in calculations:
+        total = calc.result.get("total_over_these_weeks")
+        # a "total" has to be the tool's total, not one week's figure passed off as it
+        if (
+            total
+            and total["weeks"] > 1
+            and re.search(r"\btotal", text, re.IGNORECASE)
+            and not written & {total["volume_lb"], total["volume_kg"]}
+        ):
+            problems.append(
+                f"The total volume over these {total['weeks']} weeks is {total['volume_lb']} lb "
+                f"({total['volume_kg']} kg). Use that figure for any total."
+            )
     if calculated:
         result = calculated[-1].result
         key = "target_load" if calculated[-1].tool == "target_load" else "e1rm"
@@ -271,13 +292,16 @@ class Assistant:
         """
         failed_lookup: dict[str, Any] | None = None
         failed_calculation: dict[str, Any] | None = None
+        failed_report: dict[str, Any] | None = None
         for calculation in calculations:
             failure = None if calculation.result.get("status") == "ok" else calculation.result
             if calculation.tool in LOOKUP_TOOLS:
                 failed_lookup = failure
+            elif calculation.tool in REPORT_TOOLS:
+                failed_report = failure
             else:
                 failed_calculation = failure
-        return failed_lookup or failed_calculation
+        return failed_lookup or failed_calculation or failed_report
 
     def _clarification(
         self,
@@ -304,7 +328,8 @@ class Assistant:
             variations = blocked.get("variations_with_data")
             if variations:
                 lines.append("Variations with logged sets: " + ", ".join(variations) + ".")
-            lines.append("Which set should I use?")
+            if blocked.get("kind") != "report":
+                lines.append("Which set should I use?")
             text = "\n".join(lines)
         return AssistantAnswer(
             status="needs_clarification",
@@ -330,6 +355,8 @@ class Assistant:
                 return f"Your estimated 1RM is {result['e1rm_text']}."
             if calculation.tool in LOOKUP_TOOLS:
                 return f"I found this logged set: {result['set']['description']}."
+            if calculation.tool in REPORT_TOOLS:
+                return result["text"]
         return ""
 
     def _answered(
@@ -350,6 +377,17 @@ class Assistant:
         if basis is None and any("based_on" in result for result in successes):
             flags.append("not_checked_against_log")
             text += f"\n\n{NOT_CHECKED_NOTE}"
+        reports = [
+            calc.result
+            for calc in calculations
+            if calc.tool in REPORT_TOOLS and calc.result.get("status") == "ok"
+        ]
+        if reports:
+            # these tables are a snapshot, so the answer says how old it is
+            for report in reports:
+                if "note" in report and report["note"] not in text:
+                    text += f"\n\n{report['note']}"
+            text += f"\n\nFrom your summary tables, last built {reports[-1]['as_of']}."
         if any(result.get("below_chart_range") for result in successes):
             flags.append("below_chart_range")
             if BELOW_CHART_NOTE not in text:
