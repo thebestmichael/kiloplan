@@ -112,14 +112,14 @@ def test_estimate_e1rm_from_a_logged_set(tools):
 
 
 def test_estimate_e1rm_from_a_stated_set(tools):
-    result = tools.estimate_e1rm(load=183.7, unit="kg", reps=3, rpe=9)
+    result = tools.estimate_e1rm(stated_load=183.7, unit="kg", stated_reps=3, stated_rpe=9)
     assert (result["status"], result["e1rm_kg"]) == ("ok", 200.4)
     assert result["based_on"]["rpe_source"] == "stated"
     assert "set" not in result
 
 
 def test_estimate_e1rm_flags_an_rpe_below_the_chart_range(tools):
-    result = tools.estimate_e1rm(load=240, reps=5, rpe=5.5)
+    result = tools.estimate_e1rm(stated_load=240, stated_reps=5, stated_rpe=5.5)
     assert result["below_chart_range"] is True
     assert result["note"] == BELOW_CHART_NOTE
 
@@ -130,13 +130,13 @@ def test_a_set_logged_below_rpe_5_cannot_be_a_basis(tools):
     result = tools.estimate_e1rm(set_id=logged["set_id"])
     assert result["status"] == "cannot_calculate"
     assert "RPE is <5" in result["message"]
-    assert tools.estimate_e1rm(set_id=logged["set_id"], rpe=7)["status"] == "conflict"
+    assert tools.estimate_e1rm(set_id=logged["set_id"], stated_rpe=7)["status"] == "conflict"
 
 
 def test_a_set_with_no_logged_rpe_can_use_the_lifters_stated_rpe(tools):
     logged = tools.find_sets("deadlift", week_number=4)["set"]
     assert tools.estimate_e1rm(set_id=logged["set_id"])["status"] == "cannot_calculate"
-    result = tools.estimate_e1rm(set_id=logged["set_id"], rpe=8)
+    result = tools.estimate_e1rm(set_id=logged["set_id"], stated_rpe=8)
     assert result["status"] == "ok"
     assert result["based_on"]["rpe_source"] == "stated by the lifter (not in the log)"
 
@@ -158,14 +158,18 @@ def test_target_load_for_the_example_question(tools):
 
 
 def test_target_load_within_the_chart_range_has_no_note(tools):
-    result = tools.target_load(target_reps=3, target_rpe=9, load=405, reps=3, rpe=9)
+    result = tools.target_load(
+        target_reps=3, target_rpe=9, stated_load=405, stated_reps=3, stated_rpe=9
+    )
     assert result["target_load_lb"] == 405.0
     assert result["below_chart_range"] is False
     assert "note" not in result
 
 
 def test_target_load_is_computed_at_full_precision(tools):
-    result = tools.target_load(target_reps=2, target_rpe=5, load=405, reps=3, rpe=9)
+    result = tools.target_load(
+        target_reps=2, target_rpe=5, stated_load=405, stated_reps=3, stated_rpe=9
+    )
     assert result["target_load_kg"] == pytest.approx(405 * KG_PER_LB * 36 / 33 * 30 / 36, abs=0.05)
 
 
@@ -176,19 +180,50 @@ def test_set_ids_from_another_lifter_are_not_found(tools, session):
     assert other.estimate_e1rm(set_id=found["set_id"])["status"] == "no_match"
 
 
-def test_call_dispatches_by_name_and_reports_bad_input(tools):
-    ok = tools.call("latest_top_set", {"lift": "squat", "variation": None})
-    assert ok["status"] == "ok"
-    assert tools.call("delete_everything", {})["status"] == "invalid_input"
-    assert tools.call("find_sets", {"lift": "curl"})["status"] == "invalid_input"
-    assert tools.call("find_sets", {"lift": "squat", "colour": "red"})["status"] == "invalid_input"
-    assert tools.call("estimate_e1rm", {"load": 100, "reps": 3})["status"] == "invalid_input"
-    assert tools.call("estimate_e1rm", {"load": 100, "reps": 3, "rpe": 12})["status"] == (
-        "invalid_input"
+def test_calculations_can_be_based_on_the_latest_top_set_of_a_lift(tools):
+    result = tools.target_load(target_reps=3, target_rpe=8, lift="squat")
+    assert result["status"] == "ok"
+    assert (result["set"]["load_lb"], result["set"]["day"]) == (380.0, "Day 3")
+    assert "heaviest such set" in result["set"]["chosen_by"]
+    # 380 lb x 5 at RPE 7 = 8 theoretical reps; 3 at RPE 8 = 5: 380 * 36/29 * 32/36
+    assert result["target_load_lb"] == 419.3
+
+    assert tools.estimate_e1rm(lift="squat", variation="paused")["set"]["movement"] == (
+        "Paused Squats"
     )
-    assert tools.call("estimate_e1rm", {"load": 100, "unit": "stone", "reps": 3, "rpe": 8})[
-        "status"
-    ] == ("invalid_input")
+    # no bench set qualifies as a top set, so there is nothing to calculate from
+    assert tools.target_load(target_reps=3, target_rpe=8, lift="bench")["status"] == "no_match"
+
+
+def test_a_stated_set_must_be_complete(tools):
+    result = tools.estimate_e1rm(stated_load=100, stated_reps=3)
+    assert result["status"] == "invalid_input"
+    assert tools.estimate_e1rm()["status"] == "invalid_input"
+
+
+def test_call_dispatches_by_name_and_drops_blank_arguments(tools):
+    result = tools.call("latest_top_set", {"lift": "squat", "variation": None})
+    assert result["status"] == "ok"
+    assert tools.call("find_sets", {"lift": "squat", "variation": "", "reps": 3})["status"] == "ok"
+
+
+def test_call_explains_wrong_calls_to_the_model(tools):
+    unknown_tool = tools.call("delete_everything", {})
+    assert unknown_tool["status"] == "invalid_input"
+    assert "find_sets, latest_top_set, estimate_e1rm, target_load" in unknown_tool["message"]
+
+    # the mistake a real model made: the new set's reps passed as "reps"
+    wrong = tools.call("target_load", {"reps": 3, "target_rpe": 8, "unit": "lb"})
+    assert wrong["status"] == "invalid_input"
+    assert "it has no parameter reps" in wrong["message"]
+    assert "target_reps is required" in wrong["message"]
+    assert "Its parameters are: target_reps, target_rpe, set_id, lift" in wrong["message"]
+
+    assert tools.call("find_sets", {"lift": "curl"})["status"] == "invalid_input"
+    bad_rpe = {"stated_load": 100, "stated_reps": 3, "stated_rpe": 12}
+    assert tools.call("estimate_e1rm", bad_rpe)["status"] == "invalid_input"
+    bad_unit = {"stated_load": 100, "unit": "stone", "stated_reps": 3, "stated_rpe": 8}
+    assert tools.call("estimate_e1rm", bad_unit)["status"] == "invalid_input"
 
 
 def test_every_schema_names_a_real_tool(tools):
