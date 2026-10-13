@@ -359,6 +359,26 @@ input[type='checkbox'] {
   align-items: end;
 }
 
+.choice.wrap {
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.target {
+  margin-top: 16px;
+}
+
+.target-result {
+  margin-top: 16px;
+  padding-top: 16px;
+  text-align: center;
+  border-top: 1px solid var(--border);
+}
+
+.target-result .panel-note {
+  margin: 6px 0 0;
+}
+
 .choice.centred {
   margin-bottom: 16px;
 }
@@ -905,4 +925,8 @@ td.number {
 .inline-form .wide-field {
   grid-column: 1 / -1;
   margin: 0;
+}
+
+fieldset .choice {
+  grid-column: 1 / -1;
 }
