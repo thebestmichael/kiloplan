@@ -1,4 +1,5 @@
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from kiloplan.api.main import app
@@ -28,3 +29,19 @@ def api_uses_test_database(request):
     app.dependency_overrides[get_session] = override
     yield
     app.dependency_overrides.clear()
+
+
+def sign_up(email="ben@example.com", name="Ben", password="correct horse"):
+    """A separate browser, signed up and logged in."""
+    client = TestClient(app)
+    response = client.post(
+        "/api/auth/signup", json={"email": email, "name": name, "password": password}
+    )
+    assert response.status_code == 200, response.text
+    return client
+
+
+@pytest.fixture
+def ben():
+    """Another lifter with their own account, created before the test adds any data."""
+    return sign_up()

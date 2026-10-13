@@ -67,10 +67,9 @@ def test_target_load_rejects_reps_beyond_brzycki_limit():
     assert "at most 36" in response.json()["detail"]
 
 
-def upload(workbook, lifter=None):
-    params = {"lifter": lifter} if lifter else {}
+def upload(workbook, browser=client):
     files = {"file": ("program.xlsx", as_bytes(workbook).getvalue())}
-    return client.post("/api/program/upload", files=files, params=params)
+    return browser.post("/api/program/upload", files=files)
 
 
 def small_program(top_set_load=298):
@@ -131,12 +130,15 @@ def test_upload_replaces_the_lifters_previous_program():
     assert rows[0]["actual_load_kg"] == pytest.approx(320 * 0.45359237)
 
 
-def test_programs_are_kept_per_lifter():
-    upload(small_program(top_set_load=298), lifter="ana")
-    upload(small_program(top_set_load=320), lifter="ben")
-    ana = client.get("/api/program", params={"lifter": "ana"}).json()
-    assert ana["rows"][0]["actual_load_kg"] == pytest.approx(298 * 0.45359237)
-    assert client.get("/api/program").status_code == 404
+def test_programs_are_kept_per_account(ben):
+    assert ben.get("/api/program").status_code == 404
+    upload(small_program(top_set_load=298))
+    upload(small_program(top_set_load=320), browser=ben)
+    guest = client.get("/api/program").json()
+    assert guest["rows"][0]["actual_load_kg"] == pytest.approx(298 * 0.45359237)
+    assert ben.get("/api/program").json()["rows"][0]["actual_load_kg"] == pytest.approx(
+        320 * 0.45359237
+    )
 
 
 def test_upload_rejects_non_workbook():

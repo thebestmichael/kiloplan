@@ -131,7 +131,7 @@ def test_food_search_matches_every_word(foods):
     assert client.get("/api/nutrition/foods", params={"q": "  "}).json() == []
 
 
-def test_custom_foods_come_first_and_belong_to_their_lifter(foods):
+def test_custom_foods_come_first_and_belong_to_their_lifter(foods, ben):
     mine = {"name": "Mum's chicken rice", "kcal": 150, "protein_g": 12, "carbs_g": 18, "fat_g": 3}
     created = client.post("/api/nutrition/foods", json=mine).json()
     assert (created["source"], created["category"]) == ("custom", "My foods")
@@ -140,10 +140,10 @@ def test_custom_foods_come_first_and_belong_to_their_lifter(foods):
     ]
     assert names == ["Mum's chicken rice", "Rice, white, cooked"]
 
-    other = client.get("/api/nutrition/foods", params={"q": "rice", "lifter": "ben"}).json()
+    other = ben.get("/api/nutrition/foods", params={"q": "rice"}).json()
     assert [food["name"] for food in other] == ["Rice, white, cooked"]
     log = {"day": "2026-10-13", "meal": "lunch", "food_id": created["id"], "grams": 100}
-    assert client.post("/api/nutrition/diary", json={**log, "lifter": "ben"}).status_code == 404
+    assert ben.post("/api/nutrition/diary", json=log).status_code == 404
 
 
 def log(food_id, grams, meal="lunch", day="2026-10-13"):
@@ -191,10 +191,10 @@ def test_diary_day_with_totals_goal_and_remaining(foods):
     assert day["remaining"]["kcal"] == pytest.approx(-207.5)
 
 
-def test_diary_entries_can_be_deleted_only_by_their_lifter(foods):
+def test_diary_entries_can_be_deleted_only_by_their_lifter(foods, ben):
     entry = log(foods["Rice, white, cooked"], 100).json()
     path = f"/api/nutrition/diary/{entry['id']}"
-    assert client.delete(path, params={"lifter": "ben"}).status_code == 404
+    assert ben.delete(path).status_code == 404
     assert client.delete(path).status_code == 204
     assert client.delete(path).status_code == 404
     day = client.get("/api/nutrition/diary", params={"day": "2026-10-13"}).json()
@@ -208,7 +208,7 @@ def test_diary_rejects_bad_input(foods):
     assert log(99999, 100).status_code == 404
 
 
-def test_saved_meals(foods):
+def test_saved_meals(foods, ben):
     log(foods["Chicken, breast, cooked"], 150)
     log(foods["Rice, white, cooked"], 200)
     save = {"name": "Chicken and rice", "day": "2026-10-13", "meal": "lunch"}
@@ -231,8 +231,9 @@ def test_saved_meals(foods):
     nothing = {"name": "Empty", "day": "2026-10-13", "meal": "breakfast"}
     assert client.post("/api/nutrition/meals", json=nothing).status_code == 422
     path = f"/api/nutrition/meals/{saved['id']}"
-    assert client.post(f"{path}/log", json={**target, "lifter": "ben"}).status_code == 404
-    assert client.delete(path, params={"lifter": "ben"}).status_code == 404
+    assert ben.post(f"{path}/log", json=target).status_code == 404
+    assert ben.delete(path).status_code == 404
+    assert ben.get("/api/nutrition/meals").json() == []
     assert client.delete(path).status_code == 204
     assert client.get("/api/nutrition/meals").json() == []
 
@@ -264,7 +265,7 @@ def test_recommended_water_is_35_ml_per_kg():
         recommended_water_ml(0)
 
 
-def test_recommended_water_appears_once_bodyweight_is_set():
+def test_recommended_water_appears_once_bodyweight_is_set(ben):
     day = {"day": "2026-10-13"}
     before = client.get("/api/nutrition/diary", params=day).json()
     assert (before["bodyweight_kg"], before["water_recommended_ml"]) == (None, None)
@@ -277,6 +278,6 @@ def test_recommended_water_appears_once_bodyweight_is_set():
     # changing it updates the recommendation, and it is kept per lifter
     client.put("/api/nutrition/bodyweight", json={"bodyweight_kg": 100})
     assert client.get("/api/nutrition/diary", params=day).json()["water_recommended_ml"] == 3500
-    other = client.get("/api/nutrition/diary", params={**day, "lifter": "ben"}).json()
+    other = ben.get("/api/nutrition/diary", params=day).json()
     assert other["water_recommended_ml"] is None
     assert client.put("/api/nutrition/bodyweight", json={"bodyweight_kg": 0}).status_code == 422
