@@ -62,10 +62,6 @@ function Program() {
 
   return (
     <>
-      <div className="page-intro">
-        <p>Upload your coach's spreadsheet, then ask questions about your program.</p>
-      </div>
-
       <label
         className="dropzone"
         data-dragging={dragging}

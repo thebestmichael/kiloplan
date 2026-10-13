@@ -10,9 +10,11 @@ from kiloplan.storage.models import (
     DiaryEntry,
     Food,
     Lifter,
+    LifterProfile,
     NutritionGoal,
     SavedMeal,
     SavedMealItem,
+    WaterDay,
 )
 
 MEALS = ("breakfast", "lunch", "dinner", "snacks")
@@ -204,3 +206,31 @@ def delete_saved_meal(session: Session, lifter: Lifter, meal_id: int) -> bool:
         return False
     session.delete(saved)
     return True
+
+
+def water_for_day(session: Session, lifter: Lifter, day: date) -> float:
+    logged = session.get(WaterDay, (lifter.id, day))
+    return logged.ml if logged else 0.0
+
+
+def add_water(session: Session, lifter: Lifter, day: date, ml: float) -> float:
+    """Add (or with a negative amount, take back) water for a day. Returns the new total."""
+    logged = session.get(WaterDay, (lifter.id, day))
+    if logged is None:
+        logged = WaterDay(lifter_id=lifter.id, day=day, ml=0.0)
+        session.add(logged)
+    logged.ml = max(0.0, logged.ml + ml)
+    session.flush()
+    return logged.ml
+
+
+def get_bodyweight_kg(session: Session, lifter: Lifter) -> float | None:
+    profile = session.get(LifterProfile, lifter.id)
+    return profile.bodyweight_kg if profile else None
+
+
+def set_bodyweight_kg(session: Session, lifter: Lifter, bodyweight_kg: float) -> None:
+    profile = session.get(LifterProfile, lifter.id) or LifterProfile(lifter_id=lifter.id)
+    profile.bodyweight_kg = bodyweight_kg
+    session.add(profile)
+    session.flush()

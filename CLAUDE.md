@@ -36,6 +36,10 @@ Portfolio project aimed at data engineering roles.
   assistant says so and asks; it does not guess.
 - Pain or injury input must tell the user to see a professional, with no load
   advice.
+- Accounts: passwords are hashed with Argon2; a login is a random token in an
+  HttpOnly cookie, stored only as a hash. Whose data a request touches comes from
+  that cookie (or the shared guest lifter), never from a parameter in the request.
+  Set KILOPLAN_COOKIE_SECURE=1 wherever the app is served over HTTPS.
 - Food nutrients are stored per 100 g. A diary entry copies its macros when it
   is logged, so later changes to a food never rewrite past days.
 - Points formulas (Wilks, DOTS, IPF GL) follow OpenPowerlifting's coefficients.

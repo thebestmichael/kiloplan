@@ -5,9 +5,9 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   server: {
-    // forward API calls to the FastAPI dev server
+    // forward API calls to the FastAPI dev server (KILOPLAN_API_URL points at another one)
     proxy: {
-      '/api': 'http://localhost:8000',
+      '/api': process.env.KILOPLAN_API_URL ?? 'http://localhost:8000',
     },
   },
 })

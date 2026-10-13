@@ -4,6 +4,7 @@ from kiloplan.analytics.scoring import (
     dots,
     dots_coefficient,
     ipf_gl,
+    total_for_points,
     wilks,
     wilks_2020,
     wilks_2020_coefficient,
@@ -79,3 +80,33 @@ def test_points_reject_invalid_input(formula):
         formula("male", 0, 500)
     with pytest.raises(ValueError):
         formula("male", 90, -5)
+
+
+@pytest.mark.parametrize(
+    ("formula", "score"),
+    [("dots", dots), ("wilks", wilks), ("wilks_2020", wilks_2020), ("ipf_gl", ipf_gl)],
+)
+def test_total_for_points_is_the_inverse_of_each_formula(formula, score):
+    for sex, bodyweight_kg, total_kg in (("male", 93, 702.5), ("female", 63, 410)):
+        points = score(sex, bodyweight_kg, total_kg)
+        assert total_for_points(formula, sex, bodyweight_kg, points) == pytest.approx(total_kg)
+
+
+def test_total_for_points_known_values():
+    # Wilks coefficient for a 100 kg man is 0.6085890719, so 500 points needs 500 / 0.60859
+    assert total_for_points("wilks", "male", 100, 500) == pytest.approx(821.57, abs=0.01)
+    # the published IPF GL examples, run backwards
+    equipped = total_for_points("ipf_gl", "male", 92.04, 112.85, equipped=True)
+    assert equipped == pytest.approx(1035, abs=0.05)
+    bench = total_for_points("ipf_gl", "female", 70.5, 96.78, bench_only=True)
+    assert bench == pytest.approx(122.5, abs=0.01)
+    assert total_for_points("dots", "male", 90, 0) == 0
+
+
+def test_total_for_points_rejects_what_cannot_be_answered():
+    with pytest.raises(ValueError, match="not defined"):
+        total_for_points("ipf_gl", "male", 30, 100)
+    with pytest.raises(ValueError):
+        total_for_points("dots", "male", 90, -10)
+    with pytest.raises(ValueError):
+        total_for_points("dots", "male", 0, 400)

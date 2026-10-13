@@ -4,7 +4,14 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
-from kiloplan.analytics.nutrition import Macros, for_grams, kcal_from_macros, remaining, total
+from kiloplan.analytics.nutrition import (
+    Macros,
+    for_grams,
+    kcal_from_macros,
+    recommended_water_ml,
+    remaining,
+    total,
+)
 from kiloplan.api.main import app
 from kiloplan.ingestion.usda import load_foods, read_foods
 from kiloplan.storage.models import Food
@@ -124,7 +131,7 @@ def test_food_search_matches_every_word(foods):
     assert client.get("/api/nutrition/foods", params={"q": "  "}).json() == []
 
 
-def test_custom_foods_come_first_and_belong_to_their_lifter(foods):
+def test_custom_foods_come_first_and_belong_to_their_lifter(foods, ben):
     mine = {"name": "Mum's chicken rice", "kcal": 150, "protein_g": 12, "carbs_g": 18, "fat_g": 3}
     created = client.post("/api/nutrition/foods", json=mine).json()
     assert (created["source"], created["category"]) == ("custom", "My foods")
@@ -133,10 +140,10 @@ def test_custom_foods_come_first_and_belong_to_their_lifter(foods):
     ]
     assert names == ["Mum's chicken rice", "Rice, white, cooked"]
 
-    other = client.get("/api/nutrition/foods", params={"q": "rice", "lifter": "ben"}).json()
+    other = ben.get("/api/nutrition/foods", params={"q": "rice"}).json()
     assert [food["name"] for food in other] == ["Rice, white, cooked"]
     log = {"day": "2026-10-13", "meal": "lunch", "food_id": created["id"], "grams": 100}
-    assert client.post("/api/nutrition/diary", json={**log, "lifter": "ben"}).status_code == 404
+    assert ben.post("/api/nutrition/diary", json=log).status_code == 404
 
 
 def log(food_id, grams, meal="lunch", day="2026-10-13"):
@@ -184,10 +191,10 @@ def test_diary_day_with_totals_goal_and_remaining(foods):
     assert day["remaining"]["kcal"] == pytest.approx(-207.5)
 
 
-def test_diary_entries_can_be_deleted_only_by_their_lifter(foods):
+def test_diary_entries_can_be_deleted_only_by_their_lifter(foods, ben):
     entry = log(foods["Rice, white, cooked"], 100).json()
     path = f"/api/nutrition/diary/{entry['id']}"
-    assert client.delete(path, params={"lifter": "ben"}).status_code == 404
+    assert ben.delete(path).status_code == 404
     assert client.delete(path).status_code == 204
     assert client.delete(path).status_code == 404
     day = client.get("/api/nutrition/diary", params={"day": "2026-10-13"}).json()
@@ -201,7 +208,7 @@ def test_diary_rejects_bad_input(foods):
     assert log(99999, 100).status_code == 404
 
 
-def test_saved_meals(foods):
+def test_saved_meals(foods, ben):
     log(foods["Chicken, breast, cooked"], 150)
     log(foods["Rice, white, cooked"], 200)
     save = {"name": "Chicken and rice", "day": "2026-10-13", "meal": "lunch"}
@@ -224,7 +231,53 @@ def test_saved_meals(foods):
     nothing = {"name": "Empty", "day": "2026-10-13", "meal": "breakfast"}
     assert client.post("/api/nutrition/meals", json=nothing).status_code == 422
     path = f"/api/nutrition/meals/{saved['id']}"
-    assert client.post(f"{path}/log", json={**target, "lifter": "ben"}).status_code == 404
-    assert client.delete(path, params={"lifter": "ben"}).status_code == 404
+    assert ben.post(f"{path}/log", json=target).status_code == 404
+    assert ben.delete(path).status_code == 404
+    assert ben.get("/api/nutrition/meals").json() == []
     assert client.delete(path).status_code == 204
     assert client.get("/api/nutrition/meals").json() == []
+
+
+def test_water_is_tracked_per_day_and_never_goes_below_zero():
+    day = {"day": "2026-10-13"}
+    assert client.get("/api/nutrition/diary", params=day).json()["water_ml"] == 0
+    assert client.post("/api/nutrition/water", json={**day, "ml": 250}).json() == {"water_ml": 250}
+    assert client.post("/api/nutrition/water", json={**day, "ml": 500}).json() == {"water_ml": 750}
+    assert client.post("/api/nutrition/water", json={**day, "ml": -250}).json() == {"water_ml": 500}
+
+    logged = client.get("/api/nutrition/diary", params=day).json()
+    assert logged["water_ml"] == 500
+    assert client.get("/api/nutrition/diary", params={"day": "2026-10-14"}).json()["water_ml"] == 0
+
+    assert client.post("/api/nutrition/water", json={**day, "ml": -900}).json() == {"water_ml": 0}
+
+
+def test_water_has_no_upper_limit():
+    request = {"day": "2026-10-13", "ml": 4500}
+    assert client.post("/api/nutrition/water", json=request).json() == {"water_ml": 4500}
+    assert client.post("/api/nutrition/water", json=request).json() == {"water_ml": 9000}
+
+
+def test_recommended_water_is_35_ml_per_kg():
+    assert recommended_water_ml(80) == 2800
+    assert recommended_water_ml(100.5) == pytest.approx(3517.5)
+    with pytest.raises(ValueError):
+        recommended_water_ml(0)
+
+
+def test_recommended_water_appears_once_bodyweight_is_set(ben):
+    day = {"day": "2026-10-13"}
+    before = client.get("/api/nutrition/diary", params=day).json()
+    assert (before["bodyweight_kg"], before["water_recommended_ml"]) == (None, None)
+
+    saved = client.put("/api/nutrition/bodyweight", json={"bodyweight_kg": 90}).json()
+    assert saved == {"bodyweight_kg": 90, "water_recommended_ml": 3150}
+    after = client.get("/api/nutrition/diary", params=day).json()
+    assert (after["bodyweight_kg"], after["water_recommended_ml"]) == (90, 3150)
+
+    # changing it updates the recommendation, and it is kept per lifter
+    client.put("/api/nutrition/bodyweight", json={"bodyweight_kg": 100})
+    assert client.get("/api/nutrition/diary", params=day).json()["water_recommended_ml"] == 3500
+    other = ben.get("/api/nutrition/diary", params=day).json()
+    assert other["water_recommended_ml"] is None
+    assert client.put("/api/nutrition/bodyweight", json={"bodyweight_kg": 0}).status_code == 422

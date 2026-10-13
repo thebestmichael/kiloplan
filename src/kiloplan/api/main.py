@@ -27,8 +27,8 @@ from kiloplan.analytics.e1rm import (
     weight_for_rpe,
 )
 from kiloplan.analytics.plates import bar_total, load_bar
-from kiloplan.api import nutrition
-from kiloplan.api.deps import DEFAULT_LIFTER, DbSession
+from kiloplan.api import auth, nutrition
+from kiloplan.api.deps import DbSession, Owner
 from kiloplan.chatbot.assistant import Assistant
 from kiloplan.chatbot.llm import ChatModel, ModelUnavailableError, OllamaModel
 from kiloplan.chatbot.tools import ProgramTools
@@ -37,6 +37,7 @@ from kiloplan.storage.models import Upload
 from kiloplan.storage.program_store import latest_upload, store_program
 
 app = FastAPI(title="KiloPlan")
+app.include_router(auth.router)
 app.include_router(nutrition.router)
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -188,6 +189,32 @@ def points(request: PointsRequest) -> PointsResponse:
     )
 
 
+class PointsTargetRequest(BaseModel):
+    formula: Literal["dots", "ipf_gl", "wilks", "wilks_2020"]
+    sex: Literal["male", "female"]
+    bodyweight_kg: float = Field(gt=0, le=400)
+    target_points: float = Field(ge=0, le=2000)
+    equipped: bool = False
+    bench_only: bool = False
+
+
+@app.post("/api/points/target")
+def points_target(request: PointsTargetRequest) -> dict[str, float]:
+    """The total needed to reach a points score at a bodyweight."""
+    try:
+        total_kg = scoring.total_for_points(
+            request.formula,
+            request.sex,
+            request.bodyweight_kg,
+            request.target_points,
+            request.equipped,
+            request.bench_only,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {"total_kg": total_kg}
+
+
 class AttemptsRequest(BaseModel):
     """Goal third attempts in kg. Leave a lift out to skip it."""
 
@@ -321,9 +348,7 @@ def _program_response(upload: Upload) -> ProgramResponse:
 
 
 @app.post("/api/program/upload")
-def upload_program(
-    file: UploadFile, session: DbSession, lifter: str = DEFAULT_LIFTER
-) -> ProgramResponse:
+def upload_program(file: UploadFile, session: DbSession, owner: Owner) -> ProgramResponse:
     """Parse an uploaded coach spreadsheet and store it, replacing the lifter's previous one."""
     content = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
@@ -336,14 +361,14 @@ def upload_program(
     if not result.rows:
         detail = "No program lines found. Is this the coach's program spreadsheet?"
         raise HTTPException(status_code=400, detail=detail)
-    upload = store_program(session, lifter, file.filename or "program.xlsx", result)
+    upload = store_program(session, owner.name, file.filename or "program.xlsx", result)
     session.commit()
     return _program_response(upload)
 
 
 @app.get("/api/program")
-def get_program(session: DbSession, lifter: str = DEFAULT_LIFTER) -> ProgramResponse:
-    upload = latest_upload(session, lifter)
+def get_program(session: DbSession, owner: Owner) -> ProgramResponse:
+    upload = latest_upload(session, owner.name)
     if upload is None:
         raise HTTPException(status_code=404, detail="No program uploaded yet.")
     return _program_response(upload)
@@ -357,7 +382,6 @@ def get_chat_model() -> ChatModel:
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
-    lifter: str = DEFAULT_LIFTER
 
 
 class CalculationOut(BaseModel):
@@ -378,10 +402,11 @@ class AssistantResponse(BaseModel):
 def ask_assistant(
     request: AskRequest,
     session: DbSession,
+    owner: Owner,
     model: Annotated[ChatModel, Depends(get_chat_model)],
 ) -> AssistantResponse:
     """Answer a question about the lifter's stored program. Numbers come only from tools."""
-    assistant = Assistant(model, ProgramTools(session, request.lifter))
+    assistant = Assistant(model, ProgramTools(session, owner.name))
     try:
         answer = assistant.ask(request.question)
     except ModelUnavailableError as error:
