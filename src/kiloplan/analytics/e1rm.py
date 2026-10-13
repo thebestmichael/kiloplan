@@ -114,6 +114,25 @@ def target_weight_from_pr(
     return weight_for_rpe(e1rm_kg, target_reps, target_rpe, inverse)
 
 
+def rep_max_table(e1rm_kg: float, max_reps: int = 10) -> dict[int, float]:
+    """Estimated rep maxes: the heaviest weight for 1 to `max_reps` reps."""
+    return {reps: hybrid_weight(e1rm_kg, reps) for reps in range(1, max_reps + 1)}
+
+
+def rpe_chart(
+    e1rm_kg: float, max_reps: int = 10, min_rpe: float = CHART_MIN_RPE
+) -> dict[float, dict[int, float]]:
+    """Weight for each rep count at each RPE from 10 down to `min_rpe`, in half steps."""
+    steps = int((MAX_RPE - min_rpe) * 2)
+    return {
+        MAX_RPE - half / 2: {
+            reps: weight_for_rpe(e1rm_kg, reps, MAX_RPE - half / 2)
+            for reps in range(1, max_reps + 1)
+        }
+        for half in range(steps + 1)
+    }
+
+
 def round_to_increment(weight_kg: float, increment_kg: float = 2.5) -> float:
     """Round to the nearest loadable weight, e.g. 2.5 kg jumps."""
     if increment_kg <= 0:

@@ -1,111 +1,44 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import Attempts from './tools/Attempts.tsx'
+import Plates from './tools/Plates.tsx'
+import Points from './tools/Points.tsx'
+import RepMaxes from './tools/RepMaxes.tsx'
+import RpeLoad from './tools/RpeLoad.tsx'
+import type { Unit } from './units.ts'
 
-type Unit = 'kg' | 'lb'
+const TOOLS = [
+  { id: 'rpe', label: 'RPE load', description: 'Calculate target weights based on Rate of Perceived Exertion' },
+  { id: 'plates', label: 'Plates', description: 'Work out which plates to load, or what a loaded bar weighs' },
+  { id: 'rep-maxes', label: 'Rep maxes', description: 'Estimate 1 to 10 rep maxes and an RPE chart from one set' },
+  { id: 'points', label: 'Points', description: 'Wilks, DOTS and IPF GL points for a total' },
+  { id: 'attempts', label: 'Attempts', description: 'Pick an opener, second and third attempt for a meet' },
+] as const
 
-interface TargetLoadResponse {
-  e1rm_kg: number
-  target_weight_kg: number
-}
-
-interface ValidationIssue {
-  loc: (string | number)[]
-  msg: string
-}
-
-const DEBOUNCE_MS = 200
-const KG_PER_LB = 0.45359237
-
-// The API works in kg only; these convert at the display layer.
-function toKg(value: number, unit: Unit): number {
-  return unit === 'lb' ? value * KG_PER_LB : value
-}
-
-function fromKg(valueKg: number, unit: Unit): number {
-  return unit === 'lb' ? valueKg / KG_PER_LB : valueKg
-}
-
-function errorMessage(detail: unknown): string {
-  if (typeof detail === 'string') return detail
-  if (Array.isArray(detail)) {
-    return (detail as ValidationIssue[])
-      .map((issue) => `${issue.loc[issue.loc.length - 1]}: ${issue.msg}`)
-      .join('; ')
-  }
-  return 'Something went wrong.'
-}
-
-function formatWeight(valueKg: number, unit: Unit, digits: number): string {
-  return `${fromKg(valueKg, unit).toFixed(digits)} ${unit}`
-}
+type ToolId = (typeof TOOLS)[number]['id']
 
 function Calculator() {
+  const [tool, setTool] = useState<ToolId>('rpe')
   const [unit, setUnit] = useState<Unit>('kg')
-  const [prWeight, setPrWeight] = useState('180')
-  const [prReps, setPrReps] = useState('3')
-  const [prRpe, setPrRpe] = useState('9')
-  const [targetReps, setTargetReps] = useState('3')
-  const [targetRpe, setTargetRpe] = useState('5')
-
-  const [result, setResult] = useState<TargetLoadResponse | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  function changeUnit(next: Unit) {
-    if (next === unit) return
-    const weight = Number(prWeight)
-    if (prWeight !== '' && Number.isFinite(weight)) {
-      setPrWeight(String(Number(fromKg(toKg(weight, unit), next).toFixed(1))))
-    }
-    setUnit(next)
-  }
-
-  // null until every field holds a number; range checks are left to the API
-  const fields = [prWeight, prReps, prRpe, targetReps, targetRpe]
-  const complete = fields.every((value) => value !== '' && Number.isFinite(Number(value)))
-  const requestBody = complete
-    ? JSON.stringify({
-        pr_weight_kg: toKg(Number(prWeight), unit),
-        pr_reps: Number(prReps),
-        pr_rpe: Number(prRpe),
-        target_reps: Number(targetReps),
-        target_rpe: Number(targetRpe),
-      })
-    : null
-
-  useEffect(() => {
-    if (requestBody === null) return
-    const controller = new AbortController()
-    const timer = setTimeout(async () => {
-      try {
-        const response = await fetch('/api/target-load', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: requestBody,
-          signal: controller.signal,
-        })
-        const body = await response.json()
-        if (response.ok) {
-          setResult(body as TargetLoadResponse)
-          setError(null)
-        } else {
-          setResult(null)
-          setError(errorMessage(body.detail))
-        }
-      } catch {
-        if (controller.signal.aborted) return
-        setResult(null)
-        setError('Could not reach the API. Is it running on port 8000?')
-      }
-    }, DEBOUNCE_MS)
-    return () => {
-      clearTimeout(timer)
-      controller.abort()
-    }
-  }, [requestBody])
+  const active = TOOLS.find((item) => item.id === tool)!
 
   return (
     <>
+      <div className="tool-tabs" role="tablist" aria-label="Calculators">
+        {TOOLS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={tool === item.id}
+            onClick={() => setTool(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
       <div className="page-intro">
-        <p>Calculate target weights based on Rate of Perceived Exertion</p>
+        <p>{active.description}</p>
         <div className="toolbar">
           <button
             type="button"
@@ -114,7 +47,7 @@ function Calculator() {
             aria-checked={unit === 'lb'}
             aria-label="Show weights in pounds"
             data-unit={unit}
-            onClick={() => changeUnit(unit === 'kg' ? 'lb' : 'kg')}
+            onClick={() => setUnit(unit === 'kg' ? 'lb' : 'kg')}
           >
             <span className="unit-switch-thumb" />
             <span className="unit-switch-label">kg</span>
@@ -123,91 +56,22 @@ function Calculator() {
         </div>
       </div>
 
-      <form onSubmit={(event) => event.preventDefault()}>
-        <fieldset>
-          <legend>Last Set</legend>
-          <label>
-            Weight ({unit})
-            <input
-              type="number"
-              min="0"
-              step="any"
-              required
-              value={prWeight}
-              onChange={(event) => setPrWeight(event.target.value)}
-            />
-          </label>
-          <label>
-            Reps
-            <input
-              type="number"
-              min="1"
-              step="1"
-              required
-              value={prReps}
-              onChange={(event) => setPrReps(event.target.value)}
-            />
-          </label>
-          <label>
-            RPE
-            <input
-              type="number"
-              min="1"
-              max="10"
-              step="0.5"
-              required
-              value={prRpe}
-              onChange={(event) => setPrRpe(event.target.value)}
-            />
-          </label>
-        </fieldset>
-
-        <fieldset>
-          <legend>Target Set</legend>
-          <label>
-            Reps
-            <input
-              type="number"
-              min="1"
-              step="1"
-              required
-              value={targetReps}
-              onChange={(event) => setTargetReps(event.target.value)}
-            />
-          </label>
-          <label>
-            RPE
-            <input
-              type="number"
-              min="1"
-              max="10"
-              step="0.5"
-              required
-              value={targetRpe}
-              onChange={(event) => setTargetRpe(event.target.value)}
-            />
-          </label>
-        </fieldset>
-      </form>
-
-      {complete && error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-
-      {complete && result && (
-        <section className="result" aria-live="polite">
-          <p className="result-label">Load</p>
-          <p className="result-value">{formatWeight(result.target_weight_kg, unit, 1)}</p>
-          <dl>
-            <div>
-              <dt>Estimated 1RM:</dt>
-              <dd>{formatWeight(result.e1rm_kg, unit, 1)}</dd>
-            </div>
-          </dl>
-        </section>
-      )}
+      {/* every tool stays mounted so its inputs survive switching tabs */}
+      <div hidden={tool !== 'rpe'}>
+        <RpeLoad unit={unit} />
+      </div>
+      <div hidden={tool !== 'plates'}>
+        <Plates unit={unit} />
+      </div>
+      <div hidden={tool !== 'rep-maxes'}>
+        <RepMaxes unit={unit} />
+      </div>
+      <div hidden={tool !== 'points'}>
+        <Points unit={unit} />
+      </div>
+      <div hidden={tool !== 'attempts'}>
+        <Attempts unit={unit} />
+      </div>
     </>
   )
 }
