@@ -107,8 +107,10 @@ SNOWFLAKE_ACCOUNT=...        SNOWFLAKE_USER=KILOPLAN_PIPELINE
 SNOWFLAKE_PRIVATE_KEY_PATH=~/.snowflake/rsa_key.p8
 ```
 
-Run `snowflake/setup.sql` once in Snowflake (with your public key in it) to create the
-warehouse, database, role and user, then:
+In AWS, give the pipeline its own IAM user with only the policy in `docs/iam-policy.json`
+(list, read, write and delete in one bucket). Run `snowflake/setup.sql` once in Snowflake
+(with your public key in it) to create the warehouse, database, a role limited to what the
+pipeline needs, and the user, then:
 
 ```bash
 uv sync --group snowflake
