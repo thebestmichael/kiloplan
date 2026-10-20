@@ -29,6 +29,9 @@ dev = [
     "pytest",
     "ruff",
 ]
+snowflake = [
+    "dbt-snowflake>=1.12.3",
+]
 
 [build-system]
 requires = ["uv_build"]
