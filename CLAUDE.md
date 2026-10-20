@@ -14,7 +14,10 @@ Portfolio project aimed at data engineering roles.
   interface in src/kiloplan/chatbot/llm.py
 - Pipeline: app database -> Parquet (data/lake/raw) -> dbt models in a local
   DuckDB warehouse (data/warehouse.duckdb). All of data/ is gitignored.
-- Planned, not built: S3 for the Parquet files and a Snowflake dbt target.
+- Optional cloud path: Parquet is uploaded to S3 when KILOPLAN_S3_BUCKET is set;
+  `--target snowflake` loads it into Snowflake RAW tables and builds the same dbt
+  models there. Credentials are in .env; Snowflake uses key-pair login. CI and
+  tests use only DuckDB and a simulated S3.
 - CI: GitHub Actions
 
 ## Conventions
@@ -66,6 +69,9 @@ Portfolio project aimed at data engineering roles.
 - Frontend lint / build: `cd frontend && npm run lint`, `npm run build`
 - Load USDA foods (once, downloads about 6 MB): `uv run python -m kiloplan.ingestion.usda`
 - Run the pipeline (export to Parquet, then dbt build): `uv run python -m kiloplan.pipeline`
+  Always from the repo root; paths are relative to it.
+- Pipeline on S3 and Snowflake: `uv sync --group snowflake`, then
+  `uv run python -m kiloplan.pipeline --target snowflake`
 - dbt alone: `uv run dbt build --project-dir dbt --profiles-dir dbt`
 - Assistant model: `ollama serve`, then `ollama pull qwen2.5:7b` once. Change the
   model with KILOPLAN_LLM_MODEL. Tests use ScriptedModel and need no model running.

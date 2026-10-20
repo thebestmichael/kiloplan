@@ -43,9 +43,10 @@ target RPE is below the usual chart range.
 
 ```
 Excel program ─┐
-               ├─> FastAPI + SQLite ──> Parquet files ──> dbt on DuckDB ──> summary tables
-USDA foods ────┘        │                                                        │
-                        └──────────── assistant tools (lookups, calculators) <───┘
+               ├─> FastAPI + SQLite ──> Parquet files ─┬─> dbt on DuckDB ──> summary tables
+USDA foods ────┘          │                            │                          │
+                          │                            └─> S3 ─> Snowflake ─> dbt (same models)
+                          └──────── assistant tools (lookups, calculators) <──────┘
 ```
 
 | Part | Technology |
@@ -53,10 +54,10 @@ USDA foods ────┘        │                                           
 | API | Python 3.12, FastAPI, SQLAlchemy, SQLite |
 | Frontend | React, TypeScript, Vite |
 | Spreadsheet ingestion | openpyxl, with data quality checks reported per cell |
-| Pipeline | pandas and pyarrow to Parquet, dbt (8 models, 44 data tests) on DuckDB |
+| Pipeline | pandas and pyarrow to Parquet, uploaded to S3 and loaded into Snowflake; dbt (8 models, 44 data tests) runs on DuckDB and on Snowflake |
 | Assistant | Ollama running a local model with tool calling, behind a provider interface |
 | Accounts | Argon2 password hashes, hashed session tokens in an HttpOnly cookie |
-| Quality | pytest (316 tests), ruff, GitHub Actions on every pull request |
+| Quality | pytest (322 tests), ruff, GitHub Actions on every pull request |
 
 A few design choices worth knowing:
 
@@ -94,6 +95,29 @@ To rebuild the summary tables the assistant reads for volume and food questions:
 uv run python -m kiloplan.pipeline
 ```
 
+### S3 and Snowflake (optional)
+
+The same pipeline can upload its Parquet files to S3 and build the dbt models in Snowflake.
+Put the settings in `.env` (gitignored; never commit keys):
+
+```
+AWS_ACCESS_KEY_ID=...        AWS_SECRET_ACCESS_KEY=...      AWS_REGION=...
+KILOPLAN_S3_BUCKET=...       # setting this alone turns on the S3 upload
+SNOWFLAKE_ACCOUNT=...        SNOWFLAKE_USER=KILOPLAN_PIPELINE
+SNOWFLAKE_PRIVATE_KEY_PATH=~/.snowflake/rsa_key.p8
+```
+
+Run `snowflake/setup.sql` once in Snowflake (with your public key in it) to create the
+warehouse, database, role and user, then:
+
+```bash
+uv sync --group snowflake
+uv run python -m kiloplan.pipeline --target snowflake   # run from the repo root
+```
+
+The Snowflake run loads the files from S3 into `RAW` tables and builds the models in
+`ANALYTICS`. The default run, tests and CI use DuckDB and need no cloud account.
+
 ## Development
 
 ```bash
@@ -105,8 +129,8 @@ cd frontend && npm run lint && npm run build
 
 ## Status
 
-This is a personal project that runs locally. Not built yet: S3 and Snowflake targets for
-the pipeline, branded foods, password reset, and deployment.
+This is a personal project that runs locally. The pipeline also runs on AWS S3 and Snowflake
+(see below); the app itself is not deployed. Not built yet: branded foods and password reset.
 
 ## License
 

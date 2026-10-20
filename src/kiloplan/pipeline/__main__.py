@@ -6,7 +6,9 @@ there. That needs KILOPLAN_S3_BUCKET and the SNOWFLAKE_* settings in .env.
 """
 
 import argparse
+import os
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -23,6 +25,10 @@ def main(argv: list[str] | None = None) -> int:
     target = parser.parse_args(argv).target
 
     load_dotenv()
+    key_path = os.environ.get("SNOWFLAKE_PRIVATE_KEY_PATH")
+    if key_path:
+        # dbt does not expand `~`, so hand it an absolute path
+        os.environ["SNOWFLAKE_PRIVATE_KEY_PATH"] = str(Path(key_path).expanduser())
     try:
         from dbt.cli.main import dbtRunner
     except ImportError:
