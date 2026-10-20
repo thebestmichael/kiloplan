@@ -42,11 +42,11 @@ target RPE is below the usual chart range.
 ## How it is built
 
 ```
-Excel program ─┐                                   ┌─> dbt on DuckDB ────> summary tables ──┐
-               ├─> FastAPI + SQLite ──> Parquet ───┤                                        │
-USDA foods ────┘        │                 │         └─> S3 ──> Snowflake ──> dbt (same models)
-                        │                 └─ assistant tools (lookups, calculators) <───────┘
-                        └────────────────────────────────────────────────────────────────────
+Excel program ─┐
+               ├─> FastAPI + SQLite ──> Parquet files ─┬─> dbt on DuckDB ──> summary tables
+USDA foods ────┘          │                            │                          │
+                          │                            └─> S3 ─> Snowflake ─> dbt (same models)
+                          └──────── assistant tools (lookups, calculators) <──────┘
 ```
 
 | Part | Technology |
