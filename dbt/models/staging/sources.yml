@@ -5,8 +5,9 @@ sources:
     description: >
       The app database's tables, exported as Parquet by `kiloplan.pipeline.export`.
       On DuckDB each table is read straight from its file.
-    meta:
-      external_location: "{{ env_var('KILOPLAN_LAKE_PATH', 'data/lake/raw') }}/{name}.parquet"
+    config:
+      meta:
+        external_location: "{{ env_var('KILOPLAN_LAKE_PATH', 'data/lake/raw') }}/{name}.parquet"
     tables:
       - name: uploads
         columns:
